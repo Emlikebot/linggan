@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>灵感</title>
+<meta name="description" content="灵感：截屏一键提取文字，像备忘录一样保存，三端同步，自动起标题存到 Google Drive。">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="灵感">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{
+  --bg:#f2f2f7; --cell:#ffffff; --cell2:#e9e9ee; --sep:rgba(60,60,67,.16); --text:#000; --sub:#8a8a8e; --sub2:#6c6c70;
+  --accent:#d99a00; --accentBg:rgba(227,160,8,.14); --bad:#ff3b30; --ok:#34c759; --bar:rgba(242,242,247,.86); --paper:#ffffff;
+  --mark:rgba(255,204,0,.45);
+  --safe-top:var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); --safe-bottom:var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#000; --cell:#1c1c1e; --cell2:#2c2c2e; --sep:rgba(84,84,88,.6); --text:#fff; --sub:#8d8d93; --sub2:#a1a1a6;
+    --accent:#ffcc00; --accentBg:rgba(255,204,0,.16); --bar:rgba(18,18,20,.86); --paper:#1c1c1e; --mark:rgba(255,204,0,.35); }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif;
+  -webkit-font-smoothing:antialiased;overscroll-behavior:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;padding:0}
+input,textarea,select{font:inherit;color:var(--text)}
+svg{display:block}
+.ic{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.muted{color:var(--sub);font-size:13px}
+.small{font-size:12px}
+.grow{flex:1;min-width:0}
+.row{display:flex;align-items:center;gap:10px}
+.between{justify-content:space-between}
+.wrap{flex-wrap:wrap}
+
+/* ===== 布局 ===== */
+#shell{height:100%;display:flex}
+#listPane{position:relative;width:100%;height:100%;display:flex;flex-direction:column;background:var(--bg)}
+#notePane{position:fixed;inset:0;background:var(--paper);display:flex;flex-direction:column;z-index:20;transform:translateX(100%);transition:transform .28s cubic-bezier(.3,.8,.3,1);visibility:hidden}
+body.noting #notePane{transform:none;visibility:visible}
+@media (min-width:860px){
+  #listPane{width:360px;flex:none;border-right:1px solid var(--sep)}
+  #notePane{position:relative;inset:auto;flex:1;transform:none;visibility:visible;transition:none;z-index:1}
+  #nBack{display:none!important}
+}
+.scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:calc(var(--safe-top) + 8px) 14px 4px;min-height:44px}
+.tbtn{display:inline-flex;align-items:center;gap:4px;color:var(--accent);font-size:17px;padding:6px 4px;border-radius:8px}
+.tbtn:active{opacity:.5}
+.tbtn[disabled]{opacity:.35;pointer-events:none}
+.bigtitle{font-size:34px;font-weight:700;letter-spacing:.3px;margin:2px 18px 10px;display:flex;align-items:center;gap:8px}
+.bigtitle .sync{font-size:13px;font-weight:400;color:var(--sub)}
+.search{margin:0 16px 10px;position:relative}
+.search input{width:100%;border:0;outline:none;background:var(--cell2);border-radius:11px;padding:9px 12px 9px 34px;font-size:17px;-webkit-appearance:none}
+.search svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);width:18px;height:18px;stroke:var(--sub);fill:none;stroke-width:2.2}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:0 16px 10px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:6px 13px;border-radius:16px;background:var(--cell);font-size:14px;color:var(--sub2);border:1px solid var(--sep)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+@media (prefers-color-scheme: dark){ .chip.on{color:#000} }
+
+/* ===== 分组列表（像备忘录） ===== */
+.ghead{font-size:20px;font-weight:700;margin:16px 20px 8px}
+.group{background:var(--cell);border-radius:12px;margin:0 16px;overflow:hidden}
+.nrow{display:flex;align-items:center;gap:12px;padding:11px 16px 11px 16px;position:relative;cursor:pointer}
+.nrow+.nrow::before{content:'';position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--sep)}
+body.selecting .nrow+.nrow::before{left:52px}
+.nrow:active{background:var(--cell2)}
+.nrow.cur{background:var(--accentBg)}
+.nrow .tt{font-size:17px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nrow .tt.auto{font-weight:600}
+.nrow .sub{font-size:15px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.nrow .sub b{font-weight:400;color:var(--text);opacity:.85;margin-right:8px}
+.nrow .fd{font-size:13px;color:var(--sub);margin-top:3px;display:flex;gap:10px;align-items:center;white-space:nowrap;overflow:hidden}
+.ck{display:none;flex:none;width:23px;height:23px;border-radius:50%;border:1.6px solid var(--sub);align-items:center;justify-content:center}
+body.selecting .ck{display:flex}
+.nrow.sel .ck{background:var(--accent);border-color:var(--accent)}
+.nrow.sel .ck::after{content:'';width:6px;height:11px;border:solid #fff;border-width:0 2.2px 2.2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+mark{background:var(--mark);color:inherit;border-radius:3px;padding:0 1px}
+.empty{text-align:center;color:var(--sub);padding:56px 24px;font-size:15px;line-height:1.8}
+.empty .big{font-size:44px;margin-bottom:8px}
+.pad-bottom{height:calc(var(--safe-bottom) + 80px)}
+
+/* 正在识别 */
+.jrow{display:flex;align-items:center;gap:12px;padding:10px 16px;position:relative}
+.jrow+.jrow::before{content:'';position:absolute;top:0;left:72px;right:0;border-top:.5px solid var(--sep)}
+.jrow img{width:44px;height:58px;object-fit:cover;object-position:top;border-radius:7px;background:var(--cell2);flex:none;border:.5px solid var(--sep)}
+.jrow .st{font-size:15px}
+.jrow .er{font-size:12px;color:var(--bad);margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.spin{width:18px;height:18px;border-radius:50%;border:2.2px solid var(--sep);border-top-color:var(--accent);animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.lbtn{color:var(--accent);font-size:15px;padding:4px 6px}
+.lbtn.red{color:var(--bad)}
+
+/* 底部工具栏 */
+.toolbar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;padding:8px 16px calc(var(--safe-bottom) + 8px);background:var(--bar);backdrop-filter:saturate(180%) blur(18px);-webkit-backdrop-filter:saturate(180%) blur(18px);border-top:.5px solid var(--sep);z-index:5;min-height:50px}
+.toolbar .mid{font-size:12px;color:var(--text);text-align:center;flex:1}
+.toolbar .side{min-width:70px;display:flex}
+.toolbar .side.r{justify-content:flex-end}
+.addbtn{color:var(--accent);padding:4px}
+.addbtn .ic{width:28px;height:28px}
+
+/* ===== 内容页 ===== */
+.nbar{display:flex;align-items:center;justify-content:space-between;padding:calc(var(--safe-top) + 8px) 10px 6px;min-height:44px;gap:6px}
+.nbar .acts{display:flex;gap:14px;align-items:center}
+.nbody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 22px calc(var(--safe-bottom) + 40px)}
+.nwrap{max-width:760px;margin:0 auto}
+.ndate{text-align:center;font-size:13px;color:var(--sub);margin:4px 0 14px}
+#nTitle{width:100%;border:0;outline:none;background:transparent;font-size:26px;font-weight:700;padding:0;margin:0 0 6px;line-height:1.3}
+#nTitle::placeholder{color:var(--sub);font-weight:600;font-size:17px}
+.nmeta{font-size:13px;color:var(--sub);margin:0 0 14px;line-height:1.6;display:flex;flex-wrap:wrap;gap:4px 12px}
+.badge{display:inline-flex;align-items:center;gap:4px}
+#nText{width:100%;border:0;outline:none;background:transparent;font-size:17px;line-height:1.65;resize:none;padding:0;min-height:50vh;overflow:hidden}
+.nempty{height:100%;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:15px;flex-direction:column;gap:10px}
+
+/* ===== 弹窗 ===== */
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:flex-end;justify-content:center;z-index:40}
+.mask.show{display:flex;animation:fade .2s}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.sheet{background:var(--bg);width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:14px 14px 0 0;padding:8px 0 calc(var(--safe-bottom) + 24px)}
+.sheet .grab{width:36px;height:5px;border-radius:5px;background:var(--sep);margin:2px auto 6px}
+.sheet .shead{display:flex;align-items:center;justify-content:space-between;padding:4px 16px 8px}
+.sheet .shead h2{font-size:17px;margin:0;font-weight:600}
+@media (min-width:700px){ .mask{align-items:center} .sheet{border-radius:14px;max-height:84vh} }
+.sec{font-size:13px;color:var(--sub);margin:20px 32px 7px;text-transform:uppercase;letter-spacing:.3px}
+.card{background:var(--cell);border-radius:12px;margin:0 16px;padding:14px 16px}
+.card+.card{margin-top:12px}
+.li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0;font-size:15px;border-top:.5px solid var(--sep)}
+.li:first-child{border-top:0;padding-top:0}
+.li:last-child{padding-bottom:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 16px;border-radius:10px;background:var(--cell2);font-weight:600;font-size:15px}
+.btn:active{opacity:.7}
+.btn-primary{background:var(--accent);color:#fff}
+@media (prefers-color-scheme: dark){ .btn-primary{color:#000} }
+.btn-danger{color:var(--bad)}
+.btn-sm{padding:7px 12px;font-size:14px;border-radius:9px}
+.btn-block{width:100%}
+.btn[disabled]{opacity:.5}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:13px;color:var(--sub);margin:0 2px 6px}
+.input{width:100%;padding:11px 13px;border-radius:10px;background:var(--cell2);border:1px solid transparent;outline:none;font-size:16px;-webkit-appearance:none}
+.input:focus{border-color:var(--accent)}
+.tag{display:inline-block;padding:1px 7px;border-radius:7px;font-size:11px;background:var(--cell2);color:var(--sub2)}
+.tag.ok{color:var(--ok)} .tag.bad{color:var(--bad)}
+code{background:var(--cell2);padding:1px 6px;border-radius:6px;font-size:13px;word-break:break-all}
+.guide{font-size:14px;line-height:1.75;color:var(--sub2)}
+.guide b{color:var(--text)}
+.guide ol{padding-left:20px;margin:6px 0}
+.err{color:var(--bad);font-size:13px;min-height:18px;margin:4px 2px 10px}
+.toast{position:fixed;left:50%;bottom:calc(var(--safe-bottom) + 74px);transform:translateX(-50%);background:rgba(40,40,44,.94);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;z-index:60;opacity:0;pointer-events:none;transition:.25s;max-width:86%;text-align:center}
+.toast.show{opacity:1}
+#drop{position:fixed;inset:0;background:rgba(227,160,8,.15);border:3px dashed var(--accent);z-index:70;display:none;align-items:center;justify-content:center;font-size:20px;font-weight:600;color:var(--accent);backdrop-filter:blur(2px)}
+#drop.show{display:flex}
+
+/* 登录 */
+#auth{position:fixed;inset:0;background:var(--bg);z-index:50;display:none;overflow:auto}
+#auth.show{display:block}
+#auth .box{max-width:400px;margin:0 auto;padding:calc(var(--safe-top) + 50px) 22px 40px}
+.logo{width:84px;height:84px;border-radius:20px;display:block;margin:0 auto 14px;box-shadow:0 6px 20px rgba(0,0,0,.12)}
+.seg{display:flex;background:var(--cell2);border-radius:10px;padding:3px;margin:20px 0 16px}
+.seg button{flex:1;padding:8px;border-radius:8px;color:var(--sub);font-weight:600;font-size:14px}
+.seg button.on{background:var(--cell);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+</style>
+</head>
+<body>
+<!--NATIVE_SCRIPTS-->
+<div id="shell">
+  <!-- 列表 -->
+  <aside id="listPane">
+    <div class="topbar">
+      <button class="tbtn" onclick="openSettings()" aria-label="设置"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+      <button class="tbtn" id="selBtn" onclick="toggleSelect()">选择</button>
+    </div>
+    <div class="scroll" id="listScroll">
+      <div class="bigtitle">灵感 <span class="sync" id="syncDot"></span></div>
+      <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="搜索" oninput="renderList()" autocomplete="off"></div>
+      <div class="chips" id="chips"></div>
+      <div id="notice"></div>
+      <div id="jobs"></div>
+      <div id="list"></div>
+      <div class="pad-bottom"></div>
+    </div>
+    <div class="toolbar">
+      <div class="side" id="tbL"></div>
+      <div class="mid" id="tbMid"></div>
+      <div class="side r" id="tbR"></div>
+    </div>
+  </aside>
+
+  <!-- 内容 -->
+  <main id="notePane">
+    <div class="nbar">
+      <button class="tbtn" id="nBack" onclick="closeNote()"><svg class="ic" viewBox="0 0 24 24" style="width:26px;height:26px;margin-left:-6px"><path d="m15 5-7 7 7 7"/></svg>灵感</button>
+      <span></span>
+      <div class="acts" id="nActs"></div>
+    </div>
+    <div class="nbody" id="nBody"><div class="nempty"><div style="font-size:40px">💡</div>选择一条内容，或者点右下角添加截屏</div></div>
+  </main>
+</div>
+
+<input type="file" id="picker" accept="image/*" multiple hidden onchange="addFiles(this.files);this.value=''">
+<div id="drop">松开即可识别截屏（一次最多 10 张）</div>
+
+<!-- 登录 / 注册 -->
+<div id="auth">
+  <div class="box">
+    <img class="logo" src="icons/icon-192.png" alt="">
+    <div style="text-align:center;font-size:26px;font-weight:700;letter-spacing:2px">灵感</div>
+    <div class="muted" style="text-align:center;margin-top:6px">截屏随手存，文字自动提取</div>
+    <div class="seg"><button class="on" id="tabLogin" onclick="authMode('login')">登录</button><button id="tabReg" onclick="authMode('register')">注册</button></div>
+    <div class="field"><label>用户名</label><input class="input" id="aUser" autocomplete="username" autocapitalize="off"></div>
+    <div class="field"><label>密码</label><input class="input" id="aPass" type="password" autocomplete="current-password"></div>
+    <div class="field" id="invField" style="display:none"><label>邀请码</label><input class="input" id="aInv" autocapitalize="characters" placeholder="向管理员要一个邀请码"></div>
+    <div class="err" id="aErr"></div>
+    <button class="btn btn-primary btn-block" id="aBtn" onclick="doAuth()">登录</button>
+    <div style="text-align:center;margin-top:22px"><button class="muted" onclick="openServer()">⚙︎ 服务器设置</button></div>
+  </div>
+</div>
+
+<!-- 设置 -->
+<div class="mask" id="mSet" onclick="if(event.target===this)closeSheet(this)">
+  <div class="sheet"><div class="grab"></div>
+    <div class="shead"><span style="width:44px"></span><h2>设置</h2><button class="tbtn" onclick="closeSheet('mSet')">完成</button></div>
+    <div id="setBody"></div>
+  </div>
+</div>
+<!-- 服务器设置 -->
+<div class="mask" id="mSrv" onclick="if(event.target===this)closeSheet(this)">
+  <div class="sheet"><div class="grab"></div>
+    <div class="shead"><span style="width:44px"></span><h2>服务器设置</h2><button class="tbtn" onclick="closeSheet('mSrv')">取消</button></div>
+    <div class="card">
+      <div class="field"><label>服务器网址（Apps Script 网页应用，…/exec 结尾）</label><input class="input" id="srvUrl" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off"></div>
+      <div class="err" id="srvErr"></div>
+      <button class="btn btn-primary btn-block" onclick="saveServer()">保存并测试</button>
+      <div style="margin-top:14px;text-align:center"><button class="muted" onclick="showSetup()">管理员：怎么搭建服务器？</button></div>
+    </div>
+  </div>
+</div>
+<!-- 通用信息 -->
+<div class="mask" id="mInfo" onclick="if(event.target===this)closeSheet(this)">
+  <div class="sheet"><div class="grab"></div>
+    <div class="shead"><span style="width:44px"></span><h2 id="infoTitle"></h2><button class="tbtn" onclick="closeSheet('mInfo')">关闭</button></div>
+    <div class="card"><div id="infoBody" class="guide"></div>
+      <button class="btn btn-primary btn-block" style="margin-top:14px" id="infoCopy">复制</button></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+/* ========== 基础 ========== */
+const APP_BUILD = 0;              // 安卓构建号（CI 打包时自动写入）
+const APP_ID = 'linggan';
+const REPO = 'Emlikebot/linggan';
+const SITE = 'https://emlikebot.github.io/linggan/';
+const DEFAULT_SERVER = '';        // 部署好服务器后把网页应用网址填在这里，朋友打开就能直接注册登录
+const MAX_BATCH = 10;             // 一次最多识别几张
+const PAR = 3;                    // 同时识别几张
+const isNative = () => !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad = n => String(n).padStart(2, '0');
+const hm = t => { const d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const WD = ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'];
+const dayStart = t => { const d = new Date(t); d.setHours(0,0,0,0); return d.getTime(); };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+const wide = () => matchMedia('(min-width:860px)').matches;
+function shortTime(t){
+  const d0 = dayStart(Date.now()), d = new Date(t);
+  if(t >= d0) return hm(t);
+  if(t >= d0 - 86400000) return '昨天';
+  if(t >= d0 - 6 * 86400000) return WD[d.getDay()];
+  return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+}
+function longTime(t){ const d = new Date(t); return d.getFullYear() + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日 ' + hm(t); }
+function toast(m, ms){ const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), ms || 2200); }
+function openSheet(id){ $(id).classList.add('show'); }
+function closeSheet(el){ (typeof el === 'string' ? $(el) : el).classList.remove('show'); }
+function deviceName(){
+  if(isNative()) return '安卓 App';
+  if(isIOS) return 'iPhone';
+  if(/android/i.test(navigator.userAgent)) return '安卓';
+  if(/windows/i.test(navigator.userAgent)) return 'Windows';
+  return '电脑';
+}
+const loadJ = (k, d) => { try{ const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; }catch(e){ return d; } };
+const saveJ = (k, v) => { try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} };
+const IC = {
+  add:'<svg class="ic" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  img:'<svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="1.8"/><path d="m21 15-4.5-4.5L6 21"/><path d="M17 3v0"/></svg>',
+  plusimg:'<svg class="ic" viewBox="0 0 24 24"><path d="M21 12v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3h6"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="m21 16-4.5-4.5L7 21"/><path d="M18 2v6M15 5h6"/></svg>',
+  trash:'<svg class="ic" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/></svg>',
+  copy:'<svg class="ic" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>',
+};
+
+/* ========== 本地数据库（IndexedDB） ========== */
+const DB = (() => {
+  let p;
+  const open = () => p || (p = new Promise((res, rej) => {
+    const r = indexedDB.open(APP_ID, 1);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      d.createObjectStore('notes', {keyPath:'id'});   // 内容（服务器的缓存）
+      d.createObjectStore('jobs', {keyPath:'id'});    // 等待识别的截屏（识别成功后立刻删除）
+      d.createObjectStore('kv');
+    };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  async function tx(store, mode, fn){
+    const d = await open();
+    return new Promise((res, rej) => {
+      const t = d.transaction(store, mode), s = t.objectStore(store);
+      let out; const r = fn(s);
+      if(r && 'onsuccess' in r) r.onsuccess = () => { out = r.result; };
+      t.oncomplete = () => res(out); t.onerror = t.onabort = () => rej(t.error);
+    });
+  }
+  return {
+    get: (s, k) => tx(s, 'readonly', st => st.get(k)),
+    put: (s, v, k) => tx(s, 'readwrite', st => k === undefined ? st.put(v) : st.put(v, k)),
+    del: (s, k) => tx(s, 'readwrite', st => st.delete(k)),
+    all: s => tx(s, 'readonly', st => st.getAll()),
+    clear: s => tx(s, 'readwrite', st => st.clear()),
+    putMany: (s, arr) => tx(s, 'readwrite', st => { arr.forEach(v => st.put(v)); }),
+    delMany: (s, keys) => tx(s, 'readwrite', st => { keys.forEach(k => st.delete(k)); }),
+  };
+})();
+
+/* ========== 状态 ========== */
+const AUTH_KEY = APP_ID + '-auth', SRV_KEY = APP_ID + '-server';
+let A = loadJ(AUTH_KEY, null);                                  // {token, user, server}
+const N = new Map();       // 内容 id → note
+const JOBS = new Map();    // 等待识别的截屏
+let OB = [];               // 待发送给服务器的修改
+const SY = {ok:0, err:'', code:'', busy:false, ready:true, hours:24};
+const UI = {cur:null, selecting:false, sel:new Set(), src:''};
+
+/* ========== 服务器 ========== */
+const serverUrl = () => (A && A.server) || localStorage.getItem(SRV_KEY) || DEFAULT_SERVER;
+async function api(action, body, server){
+  const url = server || serverUrl();
+  if(!url) throw Object.assign(new Error('还没设置服务器地址'), {code:'noserver'});
+  let r;
+  try{ r = await fetch(url, {method:'POST', redirect:'follow', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(Object.assign({action}, body || {}))}); }
+  catch(e){ throw Object.assign(new Error('连不上服务器，请检查网络'), {code:'net'}); }
+  let j; try{ j = await r.json(); }catch(e){ throw Object.assign(new Error(r.status >= 500 || r.status === 413 ? '服务器忙或图片太大（' + r.status + '）' : '服务器地址不对，或脚本没有部署成“任何人可访问”的网页应用'), {code:r.status >= 500 ? 'net' : 'bad'}); }
+  if(!j.ok) throw Object.assign(new Error(j.error || '未知错误'), {code:j.code || ''});
+  return j;
+}
+function sessionExpired(){
+  if(!A) return;
+  A = null; saveJ(AUTH_KEY, null);
+  toast('登录已失效，请重新登录', 3000);
+  showAuth();
+}
+
+/* ========== 添加截屏：压缩、长图切段 ========== */
+const MAX_W = 1280, SLICE_H = 3000, OVERLAP = 80, MAX_PARTS = 12;
+function loadImage(file){
+  if(window.createImageBitmap) return createImageBitmap(file).catch(() => loadImgEl(file));
+  return loadImgEl(file);
+}
+function loadImgEl(file){
+  return new Promise((res, rej) => {
+    const u = URL.createObjectURL(file), im = new Image();
+    im.onload = () => { res(im); setTimeout(() => URL.revokeObjectURL(u), 1000); };
+    im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('格式不支持')); };
+    im.src = u;
+  });
+}
+const toBlob = (c, q) => new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('图片处理失败')), 'image/jpeg', q));
+async function prepImage(file){
+  const im = await loadImage(file);
+  const w0 = im.width, h0 = im.height;
+  if(!w0 || !h0) throw new Error('图片是空的');
+  let s = Math.min(1, MAX_W / w0);
+  const step = SLICE_H - OVERLAP;
+  if(h0 * s > MAX_PARTS * step) s = (MAX_PARTS * step) / h0;      // 特别长的长截屏：再缩小一点
+  const W = Math.max(1, Math.round(w0 * s)), H = Math.max(1, Math.round(h0 * s));
+  const parts = [];
+  for(let y = 0; y < H && parts.length < MAX_PARTS; y += step){
+    const h = Math.min(SLICE_H, H - y);
+    if(parts.length && h <= OVERLAP) break;
+    const c = document.createElement('canvas'); c.width = W; c.height = h;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, h);
+    g.drawImage(im, 0, y / s, w0, h / s, 0, 0, W, h);
+    parts.push(await toBlob(c, .85));
+    if(y + h >= H) break;
+  }
+  const tw = 120, th = Math.min(Math.round(h0 * tw / w0), 160);
+  const c = document.createElement('canvas'); c.width = tw; c.height = th;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, tw, th);
+  g.drawImage(im, 0, 0, w0, th * w0 / tw, 0, 0, tw, th);
+  const thumb = await toBlob(c, .7);
+  if(im.close) im.close();
+  return {parts, thumb};
+}
+async function addFiles(list){
+  if(!A){ toast('请先登录'); return; }
+  let files = [...(list || [])].filter(f => f && (/^image\//.test(f.type) || /\.(png|jpe?g|webp|heic|heif|gif|bmp)$/i.test(f.name || '')));
+  if(!files.length){ toast('没有找到图片'); return; }
+  if(files.length > MAX_BATCH){ toast(`一次最多 ${MAX_BATCH} 张，已取前 ${MAX_BATCH} 张`, 3000); files = files.slice(0, MAX_BATCH); }
+  else toast(`正在识别 ${files.length} 张截屏…`);
+  const base = Date.now();
+  for(let i = 0; i < files.length; i++){
+    try{
+      const {parts, thumb} = await prepImage(files[i]);
+      const j = {id:'sc' + uid(), t:base + i, parts, thumb, state:'wait', tries:0, err:'', nextTry:0};
+      JOBS.set(j.id, j); await DB.put('jobs', jobRec(j));
+      renderJobs(); kickJobs();
+    }catch(e){ toast(`第 ${i + 1} 张图片打不开：${e.message}`, 3000); }
+  }
+}
+const jobRec = j => ({id:j.id, t:j.t, parts:j.parts, thumb:j.thumb, state:j.state === 'run' ? 'wait' : j.state, tries:j.tries, err:j.err, nextTry:j.nextTry});
+function pickImages(){ if(!A){ showAuth(); return; } $('picker').click(); }
+
+/* ========== 识别（服务器调 OpenRouter，只拿回文字） ========== */
+let jobRunning = 0;
+function blobB64(blob){
+  return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.onerror = () => rej(fr.error); fr.readAsDataURL(blob); });
+}
+function kickJobs(){
+  if(!A || !navigator.onLine) return;
+  const now = Date.now();
+  const ready = [...JOBS.values()].filter(j => j.state === 'wait' && (j.nextTry || 0) <= now).sort((a, b) => a.t - b.t);
+  while(jobRunning < PAR && ready.length) runJob(ready.shift());
+}
+async function runJob(j){
+  jobRunning++; j.state = 'run'; renderJobs();
+  try{
+    const images = [];
+    for(const b of j.parts) images.push({data:await blobB64(b), mime:'image/jpeg'});
+    const r = await api('add', {token:A.token, id:j.id, t:j.t, device:deviceName(), images});
+    await dropJob(j.id);                                   // 识别完就把图片删掉，不留档
+    if(r.note) await putNotes([r.note]);
+    else if(r.empty) toast('有 1 张截屏没有识别到文字，已跳过', 3000);
+  }catch(e){
+    if(!JOBS.has(j.id)) return;
+    j.err = e.message; j.tries = (j.tries || 0) + 1;
+    if(e.code === 'auth'){ j.state = 'wait'; sessionExpired(); }
+    else if(e.code === 'ocr' && j.tries >= 3){ j.state = 'fail'; }
+    else { j.state = 'wait'; j.nextTry = Date.now() + (e.code === 'net' ? 15000 : e.code === 'nokey' ? 60000 : Math.min(600000, 8000 * Math.pow(2, j.tries))); }
+    await DB.put('jobs', jobRec(j)).catch(() => {});
+  }finally{
+    jobRunning--; renderJobs(); setTimeout(kickJobs, 30);
+  }
+}
+async function dropJob(id){
+  const j = JOBS.get(id);
+  if(j && j.thumbUrl) URL.revokeObjectURL(j.thumbUrl);
+  JOBS.delete(id); await DB.del('jobs', id);
+}
+function retryJob(id){ const j = JOBS.get(id); if(!j) return; j.state = 'wait'; j.tries = 0; j.nextTry = 0; j.err = ''; DB.put('jobs', jobRec(j)); renderJobs(); kickJobs(); }
+async function abandonJob(id){ await dropJob(id); renderJobs(); toast('已放弃这张截屏'); }
+function retryAllJobs(){ JOBS.forEach(j => { if(j.state !== 'run'){ j.state = 'wait'; j.nextTry = 0; } }); kickJobs(); }
+setInterval(kickJobs, 15000);
+window.addEventListener('online', () => { retryAllJobs(); flushOutbox(); pull(); });
+
+function renderJobs(){
+  const list = [...JOBS.values()].sort((a, b) => a.t - b.t);
+  if(!list.length){ $('jobs').innerHTML = ''; renderToolbar(); return; }
+  const rows = list.map(j => {
+    if(!j.thumbUrl && j.thumb) j.thumbUrl = URL.createObjectURL(j.thumb);
+    const n = (j.parts || []).length;
+    let st, act = '';
+    if(j.state === 'run'){ st = `<div class="row"><span class="spin"></span><span class="st">正在提取文字…</span></div>`; }
+    else if(j.state === 'fail'){ st = `<div class="st">识别失败</div><div class="er">${esc(j.err)}</div>`; act = `<button class="lbtn" onclick="retryJob('${j.id}')">重试</button><button class="lbtn red" onclick="abandonJob('${j.id}')">放弃</button>`; }
+    else if(j.err){ st = `<div class="st" style="color:var(--sub)">等待重试</div><div class="er">${esc(j.err)}</div>`; act = `<button class="lbtn" onclick="retryJob('${j.id}')">重试</button><button class="lbtn red" onclick="abandonJob('${j.id}')">放弃</button>`; }
+    else { st = `<div class="st" style="color:var(--sub)">${navigator.onLine ? '排队中…' : '离线，联网后自动识别'}</div>`; act = `<button class="lbtn red" onclick="abandonJob('${j.id}')">放弃</button>`; }
+    return `<div class="jrow"><img src="${j.thumbUrl || ''}" alt=""><div class="grow">${st}${n > 1 ? `<div class="muted small">长截屏，分 ${n} 段识别</div>` : ''}</div>${act}</div>`;
+  }).join('');
+  $('jobs').innerHTML = `<div class="ghead">正在识别 <span class="muted" style="font-size:15px;font-weight:400">${list.length} 张</span></div><div class="group">${rows}</div>`;
+  renderToolbar();
+}
+
+/* ========== 同步 ========== */
+async function putNotes(list){
+  if(!list.length) return;
+  list.forEach(n => N.set(n.id, n));
+  await DB.putMany('notes', list);
+  applyOutboxLocal();
+  renderList(); refreshNote();
+}
+let pulling = false;
+async function pull(){
+  if(!A || pulling) return;
+  pulling = true; SY.busy = true; renderSync();
+  try{
+    await flushOutbox();
+    const since = (await DB.get('kv', 'since')) || 0;
+    const r = await api('pull', {token:A.token, since});
+    if(r.full){ await DB.clear('notes'); N.clear(); }
+    r.notes.forEach(n => N.set(n.id, n)); await DB.putMany('notes', r.notes);
+    r.deleted.forEach(id => N.delete(id)); await DB.delMany('notes', r.deleted);
+    await DB.put('kv', r.now - 60000, 'since');   // 留 1 分钟重叠，防止漏掉刚写入的
+    applyOutboxLocal();
+    SY.ok = Date.now(); SY.err = ''; SY.code = ''; SY.ready = r.ready; SY.hours = r.archiveHours == null ? 24 : r.archiveHours;
+    saveJ(APP_ID + '-hours', SY.hours);
+    if(r.ready) JOBS.forEach(j => { if(j.state === 'wait' && /OpenRouter/.test(j.err || '')) j.nextTry = 0; });
+    kickJobs();
+  }catch(e){
+    SY.err = e.message; SY.code = e.code;
+    if(e.code === 'auth') sessionExpired();
+  }
+  pulling = false; SY.busy = false;
+  renderSync(); renderList(); refreshNote(); renderNotice();
+}
+setInterval(() => { if(A && !document.hidden && navigator.onLine) pull(); }, 60000);
+
+/* 修改、删除、合并：先在本机生效，再排队发给服务器 */
+async function queueOp(op){
+  if(op.type === 'update'){
+    const ex = OB.find(o => o.type === 'update' && o.id === op.id && OB.indexOf(o) === OB.length - 1);
+    if(ex) Object.assign(ex, op); else OB.push(op);
+  } else OB.push(op);
+  await DB.put('kv', OB, 'outbox');
+  applyOutboxLocal(); renderList(); refreshNote();
+  flushOutbox();
+}
+function mergeLocal(ids){
+  const list = ids.map(id => N.get(id)).filter(Boolean).sort((a, b) => a.t - b.t || (a.id < b.id ? -1 : 1));
+  if(list.length < 2) return;
+  const keep = Object.assign({}, list[0]);
+  keep.text = list.map(x => String(x.text || '').trim()).filter(Boolean).join('\n\n———\n\n');
+  keep.count = list.reduce((a, x) => a + (x.count || 1), 0);
+  const srcs = [...new Set(list.map(x => x.source || '其他'))];
+  keep.source = srcs.length === 1 ? srcs[0] : srcs.join(' + ');
+  if(keep.titleBy !== 'user'){ keep.title = ''; keep.titleBy = ''; }
+  keep.dirty = true;
+  N.set(keep.id, keep);
+  list.slice(1).forEach(x => N.delete(x.id));
+}
+function applyOutboxLocal(){
+  OB.forEach(op => {
+    if(op.type === 'update'){
+      const n = N.get(op.id); if(!n) return;
+      if(op.text != null) n.text = op.text;
+      if(op.title != null){ n.title = op.title; n.titleBy = op.title ? 'user' : ''; }
+    }
+    if(op.type === 'delete') op.ids.forEach(id => N.delete(id));
+    if(op.type === 'merge') mergeLocal(op.ids);
+  });
+}
+let obBusy = false;
+async function flushOutbox(){
+  if(obBusy || !A || !OB.length) return;
+  obBusy = true;
+  try{
+    while(OB.length && A){
+      const op = OB[0];
+      try{
+        if(op.type === 'update'){ const b = {token:A.token, id:op.id}; if(op.text != null) b.text = op.text; if(op.title != null) b.title = op.title; const r = await api('note.update', b); if(r.note){ N.set(r.note.id, r.note); await DB.put('notes', r.note); } }
+        else if(op.type === 'delete'){ await api('note.delete', {token:A.token, ids:op.ids}); await DB.delMany('notes', op.ids); }
+        else if(op.type === 'merge'){ const r = await api('note.merge', {token:A.token, ids:op.ids}); N.set(r.note.id, r.note); await DB.put('notes', r.note); r.deleted.forEach(id => N.delete(id)); await DB.delMany('notes', r.deleted); }
+      }catch(e){
+        if(e.code === 'auth'){ sessionExpired(); break; }
+        if(e.code === 'net' || e.code === 'noserver' || e.code === 'bad') break;
+        toast(e.message, 3000);                 // 其他错误（比如内容已经不在了）就放弃这条修改
+      }
+      OB.shift(); await DB.put('kv', OB, 'outbox');
+    }
+  }finally{ obBusy = false; applyOutboxLocal(); renderList(); refreshNote(); renderSync(); }
+}
+function renderSync(){
+  const el = $('syncDot');
+  el.textContent = !A ? '' : SY.busy ? '同步中…' : SY.err ? (SY.code === 'net' ? '离线' : '⚠️') : OB.length ? '待同步' : '';
+  el.title = syncText();
+  const t = $('accSync'); if(t) t.textContent = syncText();
+}
+function syncText(){
+  if(!A) return '';
+  if(SY.busy) return '同步中…';
+  if(SY.err) return SY.code === 'net' ? '离线，联网后自动识别和同步' : SY.err;
+  return SY.ok ? '已同步 ' + hm(SY.ok) : '已登录';
+}
+
+/* ========== 列表 ========== */
+const firstLine = t => (String(t || '').split('\n').map(l => l.trim()).filter(Boolean)[0] || '');
+const titleOf = n => n.title || firstLine(n.text).slice(0, 60) || '无标题';
+function previewOf(n, q){
+  const text = String(n.text || '').replace(/\s+/g, ' ').trim();
+  if(q){
+    const i = text.toLowerCase().indexOf(q.toLowerCase());
+    if(i >= 0){ const s = Math.max(0, i - 12); return (s ? '…' : '') + text.slice(s, s + 90); }
+  }
+  if(!n.title){ const fl = firstLine(n.text); const rest = String(n.text || '').slice(String(n.text || '').indexOf(fl) + fl.length).replace(/\s+/g, ' ').trim(); return rest || '没有更多文字'; }
+  return text.slice(0, 90);
+}
+function hl(text, q){
+  const t = esc(text);
+  if(!q) return t;
+  const qq = esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return t.replace(new RegExp(qq, 'gi'), m => '<mark>' + m + '</mark>');
+}
+const dueAt = n => n.t + SY.hours * 3600000;
+function stateOf(n){
+  if(n.drive && n.drive.fileId) return n.dirty ? {ic:'☁️', s:'已存 Drive · 修改 1 小时内同步过去'} : {ic:'☁️', s:'已存到 Google Drive'};
+  const left = dueAt(n) - Date.now();
+  if(left > 0){ const h = Math.floor(left / 3600000), m = Math.ceil(left / 60000); return {ic:'⏳', s:(h >= 1 ? h + ' 小时' : m + ' 分钟') + '后起标题、存 Drive', left}; }
+  return {ic:'⏳', s:'即将起标题、存 Drive（每小时整理一次）'};
+}
+function groupOf(t){
+  const d0 = dayStart(Date.now());
+  if(t >= d0) return '今天';
+  if(t >= d0 - 86400000) return '昨天';
+  if(t >= d0 - 7 * 86400000) return '过去 7 天';
+  if(t >= d0 - 30 * 86400000) return '过去 30 天';
+  const d = new Date(t); return d.getFullYear() + '年' + (d.getMonth() + 1) + '月';
+}
+function visibleNotes(){
+  const q = $('q').value.trim().toLowerCase();
+  let list = [...N.values()];
+  if(UI.src) list = list.filter(n => (n.source || '其他').split(' + ').includes(UI.src));
+  if(q) list = list.filter(n => ((n.title || '') + '\n' + (n.text || '')).toLowerCase().includes(q));
+  return list.sort((a, b) => b.t - a.t);
+}
+let rlT = null;
+function renderList(){ clearTimeout(rlT); rlT = setTimeout(renderListNow, 16); }
+function renderListNow(){
+  renderChips();
+  const q = $('q').value.trim();
+  const list = visibleNotes();
+  if(!list.length){
+    $('list').innerHTML = N.size || JOBS.size ? (N.size ? `<div class="empty">${q ? '没有找到「' + esc(q) + '」' : '这个来源还没有内容'}</div>` : '')
+      : `<div class="empty"><div class="big">💡</div>还没有内容<br>点右下角 <b style="color:var(--accent)">添加截屏</b>，一次最多 10 张<br>只提取文字，截屏本身不保存</div>`;
+    renderToolbar(); return;
+  }
+  const groups = new Map();
+  list.forEach(n => { const g = groupOf(n.t); if(!groups.has(g)) groups.set(g, []); groups.get(g).push(n); });
+  let h = '';
+  groups.forEach((arr, g) => {
+    h += `<div class="ghead">${g}</div><div class="group">` + arr.map(n => {
+      const st = stateOf(n);
+      return `<div class="nrow${UI.sel.has(n.id) ? ' sel' : ''}${UI.cur === n.id && wide() ? ' cur' : ''}" data-id="${n.id}" onclick="rowClick('${n.id}')">
+        <span class="ck"></span>
+        <div class="grow"><div class="tt">${hl(titleOf(n), q)}</div>
+          <div class="sub"><b>${shortTime(n.t)}</b>${hl(previewOf(n, q), q)}</div>
+          <div class="fd"><span>📱 ${esc(n.source || '其他')}${(n.count || 1) > 1 ? ' · ' + n.count + ' 张' : ''}</span><span>${st.ic} ${n.drive ? '已存 Drive' : st.left ? st.s.replace('后起标题、存 Drive', '后整理') : '即将整理'}</span></div></div></div>`;
+    }).join('') + '</div>';
+  });
+  $('list').innerHTML = h;
+  renderToolbar();
+}
+function renderChips(){
+  const cnt = new Map();
+  N.forEach(n => (n.source || '其他').split(' + ').forEach(s => cnt.set(s, (cnt.get(s) || 0) + 1)));
+  if(UI.src && !cnt.has(UI.src)) UI.src = '';
+  const order = ['X', '小红书', '微信', 'Telegram', '微博', '抖音', '知乎', '其他'];
+  const srcs = [...cnt.keys()].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
+  $('chips').innerHTML = srcs.length > 1 ? `<button class="chip${UI.src ? '' : ' on'}" onclick="setSrc('')">全部 ${N.size}</button>` +
+    srcs.map(s => `<button class="chip${UI.src === s ? ' on' : ''}" onclick="setSrc('${esc(s)}')">${esc(s)} ${cnt.get(s)}</button>`).join('') : '';
+}
+function setSrc(s){ UI.src = s; renderList(); }
+function renderToolbar(){
+  if(UI.selecting){
+    const n = UI.sel.size;
+    $('tbL').innerHTML = `<button class="tbtn" onclick="mergeSelected()" ${n < 2 ? 'disabled' : ''}>合并</button>`;
+    $('tbMid').textContent = n ? `已选 ${n} 条` : '选择要合并或删除的内容';
+    $('tbR').innerHTML = `<button class="tbtn" style="color:var(--bad)" onclick="deleteSelected()" ${n < 1 ? 'disabled' : ''}>删除</button>`;
+  } else {
+    $('tbL').innerHTML = '';
+    const j = JOBS.size;
+    $('tbMid').textContent = (N.size ? N.size + ' 条内容' : '') + (j ? (N.size ? ' · ' : '') + j + ' 张识别中' : '');
+    $('tbR').innerHTML = `<button class="addbtn" id="addBtn" onclick="pickImages()" aria-label="添加截屏" title="添加截屏（也可以拖进来或 Ctrl+V 粘贴）">${IC.plusimg}</button>`;
+  }
+}
+function rowClick(id){
+  if(UI.selecting){ UI.sel.has(id) ? UI.sel.delete(id) : UI.sel.add(id); renderList(); return; }
+  openNote(id);
+}
+function toggleSelect(force){
+  UI.selecting = force == null ? !UI.selecting : force;
+  UI.sel.clear();
+  document.body.classList.toggle('selecting', UI.selecting);
+  $('selBtn').textContent = UI.selecting ? '完成' : '选择';
+  renderList();
+}
+async function mergeSelected(){
+  const ids = [...UI.sel].filter(id => N.has(id));
+  if(ids.length < 2) return;
+  if(!confirm(`把选中的 ${ids.length} 条合并成一条？\n按提取时间从早到晚拼在一起，合并后不能拆开。`)) return;
+  const keep = ids.map(id => N.get(id)).sort((a, b) => a.t - b.t || (a.id < b.id ? -1 : 1))[0].id;
+  toggleSelect(false);
+  await queueOp({type:'merge', ids});
+  toast(`已合并 ${ids.length} 条`);
+  openNote(keep);
+}
+async function deleteSelected(){
+  const ids = [...UI.sel].filter(id => N.has(id));
+  if(!ids.length) return;
+  if(!confirm(`删除选中的 ${ids.length} 条内容？\n已经存到 Google Drive 的文件也会移到回收站。`)) return;
+  toggleSelect(false);
+  if(ids.includes(UI.cur)) closeNote();
+  await queueOp({type:'delete', ids});
+  toast(`已删除 ${ids.length} 条`);
+}
+
+/* ========== 内容页（像备忘录一样直接编辑） ========== */
+let edT = null, edDirty = {}, noteSig = '';
+function openNote(id){
+  if(!N.has(id)) return;
+  flushEdit();
+  const was = document.body.classList.contains('noting');
+  UI.cur = id; noteSig = '';
+  renderNote(true);
+  if(!wide()){
+    document.body.classList.add('noting');
+    if(!was) history.pushState({note:1}, '');
+  }
+  renderList();
+}
+function closeNote(fromPop){
+  flushEdit();
+  if(!wide()){
+    document.body.classList.remove('noting');
+    if(!fromPop && history.state && history.state.note){ history.back(); }
+  }
+  if(!wide()) setTimeout(() => { if(!document.body.classList.contains('noting')){ UI.cur = null; renderNote(); renderList(); } }, 300);
+  else { UI.cur = null; renderNote(); renderList(); }
+}
+window.addEventListener('popstate', () => { if(document.body.classList.contains('noting')) closeNote(true); });
+function refreshNote(){
+  if(!UI.cur) return;
+  if(!N.has(UI.cur)){ UI.cur = null; if(!wide()) document.body.classList.remove('noting'); renderNote(); return; }
+  renderNote(false);
+}
+function renderNote(first){
+  const n = UI.cur && N.get(UI.cur);
+  if(!n){
+    $('nActs').innerHTML = '';
+    $('nBody').innerHTML = `<div class="nempty"><div style="font-size:40px">💡</div>${N.size ? '选择一条内容' : '点列表右下角的图标添加截屏'}${wide() ? '<div class="muted">也可以把截屏直接拖进窗口，或者 Ctrl+V 粘贴</div>' : ''}</div>`;
+    return;
+  }
+  const st = stateOf(n);
+  const sig = [n.id, n.title, n.text, n.source, n.count, n.drive && n.drive.fileId, n.dirty, st.s].join('|');
+  const ae = document.activeElement;
+  const editing = ae && (ae.id === 'nText' || ae.id === 'nTitle') && $('nBody').contains(ae);
+  if(!first && sig === noteSig) return;
+  if(!first && editing){                      // 正在编辑：只更新状态行，不打断输入
+    const m = $('nMeta'); if(m) m.innerHTML = metaHtml(n, st);
+    if(ae.id !== 'nTitle' && $('nTitle') && !edDirty.title) $('nTitle').value = n.title || '';
+    return;
+  }
+  noteSig = sig;
+  $('nActs').innerHTML = `<button class="tbtn" onclick="copyNote()" title="复制全部文字">${IC.copy}</button><button class="tbtn" onclick="deleteCur()" title="删除">${IC.trash}</button>`;
+  const pending = !n.title && !n.drive;
+  $('nBody').innerHTML = `<div class="nwrap"><div class="ndate">${longTime(n.t)}</div>
+    <input id="nTitle" value="${esc(n.title || '')}" placeholder="${pending ? '标题：' + esc(st.s.replace('后起标题、存 Drive', '后自动生成').replace(/^即将起标题、存 Drive.*$/, '马上自动生成')) + '，也可以自己写' : '标题'}" oninput="onEdit('title')" onblur="flushEdit()" enterkeyhint="next">
+    <div class="nmeta" id="nMeta">${metaHtml(n, st)}</div>
+    <textarea id="nText" oninput="onEdit('text');grow(this)" onblur="flushEdit()" spellcheck="false">${esc(n.text || '')}</textarea></div>`;
+  grow($('nText'));
+  if(first) $('nBody').scrollTop = 0;
+}
+function metaHtml(n, st){
+  return `<span class="badge">📱 ${esc(n.source || '其他')}</span>${(n.count || 1) > 1 ? `<span class="badge">🧩 ${n.count} 张截屏合并</span>` : ''}<span class="badge">${st.ic} ${esc(st.s)}</span>${n.device ? `<span class="badge">来自 ${esc(n.device)}</span>` : ''}`;
+}
+function grow(ta){ if(!ta) return; ta.style.height = 'auto'; ta.style.height = Math.max(ta.scrollHeight, 200) + 'px'; }
+function onEdit(k){ edDirty[k] = true; clearTimeout(edT); edT = setTimeout(flushEdit, 900); }
+function flushEdit(){
+  clearTimeout(edT);
+  const id = UI.cur, n = id && N.get(id);
+  if(!n || (!edDirty.text && !edDirty.title)){ edDirty = {}; return; }
+  const op = {type:'update', id};
+  if(edDirty.text && $('nText')){ const v = $('nText').value; if(v !== n.text) op.text = v; }
+  if(edDirty.title && $('nTitle')){ const v = $('nTitle').value.trim(); if(v !== (n.title || '')) op.title = v; }
+  edDirty = {};
+  if(op.text == null && op.title == null) return;
+  queueOp(op);
+}
+function copyNote(){ const n = N.get(UI.cur); if(!n) return; copyText((n.title ? n.title + '\n\n' : '') + (n.text || '')); }
+async function deleteCur(){
+  const id = UI.cur; if(!id) return;
+  if(!confirm('删除这条内容？\n已经存到 Google Drive 的文件也会移到回收站。')) return;
+  edDirty = {};
+  closeNote();
+  await queueOp({type:'delete', ids:[id]});
+  toast('已删除');
+}
+setInterval(() => { renderList(); refreshNote(); }, 60000);   // 倒计时
+
+/* ========== 设置 ========== */
+function openSettings(){ renderSettings(); openSheet('mSet'); }
+function renderSettings(){
+  if(!A){ $('setBody').innerHTML = `<div class="card"><button class="btn btn-primary btn-block" onclick="closeSheet('mSet');showAuth()">登录</button></div>`; return; }
+  const site = location.protocol.startsWith('http') && !isNative() ? location.origin + location.pathname.replace(/index\.html$/, '') : SITE;
+  $('setBody').innerHTML = `
+    <div class="sec">账号</div>
+    <div class="card"><div class="row between"><div><div style="font-size:18px;font-weight:700">${esc(A.user.username)}${A.user.admin ? ' <span class="tag ok">管理员</span>' : ''}</div>
+      <div class="muted" id="accSync" style="margin-top:4px">${esc(syncText())}</div></div><button class="btn btn-sm" onclick="pull()">立即同步</button></div>
+      <div class="row wrap" style="margin-top:14px"><button class="btn btn-sm" onclick="changePw()">修改密码</button><button class="btn btn-sm btn-danger" onclick="logout()">退出登录</button></div></div>
+    <div class="sec">怎么用</div>
+    <div class="card guide">
+      点右下角 <b>添加截屏</b>（一次最多 10 张），自动只提取文字，截屏图片识别完就丢掉，不在任何地方保存。<br>
+      每张截屏单独一条，像备忘录一样可以直接改；点「选择」可以勾几条<b>合并</b>或<b>删除</b>。<br>
+      提取 ${SY.hours} 小时后，AI 自动给每条起标题，并存到 Google Drive「灵感云端」。<br>
+      <b>Windows</b>：可以把截屏直接拖进窗口，或者 Ctrl+V 粘贴。<br>
+      <b>安卓</b>：相册里选中截屏 → 分享 → 灵感，直接开始识别。<br>
+      <b>iPhone</b>：可以设置一个快捷指令，在相册里 分享 → 存到灵感。<button class="lbtn" onclick="showShortcut()">看步骤</button>
+    </div>
+    <div class="sec">安装到各设备</div>
+    <div class="card guide">
+      <b>iPhone</b>：Safari 打开 <code>${esc(site)}</code> → 分享 → 添加到主屏幕<br>
+      <b>Windows</b>：Edge / Chrome 打开同一网址 → 地址栏右侧「安装」<br>
+      <b>安卓</b>：下载安装 <code>github.com/${REPO}/releases/latest/download/linggan.apk</code>
+    </div>
+    <div id="adminBox"></div>
+    <div class="muted small" style="text-align:center;margin:18px 0 8px;line-height:1.7">${isNative() ? `安卓版 1.${APP_BUILD} · ` : ''}内容存在你的 Google Drive，登录同一账号的设备自动同步
+      ${latestApk ? `<br><button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="location.href=latestApk.url">🆕 下载新版本 1.${latestApk.n}</button>` : ''}</div>`;
+  renderAdmin();
+}
+function renderNotice(){
+  let h = '';
+  if(A && SY.ok && !SY.ready) h = `<div class="card" style="margin-bottom:6px"><b>⚠️ 服务器还不能识别截屏</b><div class="muted" style="margin-top:6px;line-height:1.6">${A.user.admin ? '请到「设置 → 管理员 → 服务器配置」填写 OpenRouter API Key。' : '管理员还没配置 OpenRouter API Key，截屏会先排队，配好后自动识别。'}</div></div>`;
+  $('notice').innerHTML = h;
+}
+function showShortcut(){
+  const tok = A ? A.token : '';
+  showInfo('iPhone：分享 → 存到灵感', `<ol>
+    <li>打开「快捷指令」App → 右上角 ＋ 新建，名字叫「存到灵感」</li>
+    <li>点底部 ⓘ → 打开「在共享表单中显示」，接收类型只留「图像」</li>
+    <li>添加操作「转换图像」→ 转换为 <b>JPEG</b>；再加「调整图像大小」→ 宽度 <b>1280</b>（长截屏也没问题）</li>
+    <li>添加「重复（对每一项）」，在重复里面加：
+      <br>• 「Base64 编码」，编码「重复项目」，点展开把「换行」改成 <b>无</b>
+      <br>• 「获取 URL 内容」：网址填下面的<b>服务器网址</b>；方法 <b>POST</b>；请求体 <b>JSON</b>，加 4 个文本字段：
+      <br>　<code>action</code> = <code>add</code>
+      <br>　<code>token</code> = 下面的<b>密钥</b>
+      <br>　<code>data</code> = Base64 编码的结果
+      <br>　<code>device</code> = <code>iPhone 快捷指令</code></li>
+    <li>重复外面加「显示通知」：已存到灵感</li>
+  </ol>
+  <p>以后在相册里选中截屏（可以多选）→ 分享 → 存到灵感，就会在后台识别，打开 App 就能看到。</p>
+  <p><b>服务器网址</b><br><code>${esc(serverUrl())}</code><br><button class="lbtn" onclick="copyText(serverUrl())">复制网址</button></p>
+  <p><b>密钥</b>（等于你的登录凭证，不要发给别人；修改密码后要换成新的）<br><button class="lbtn" onclick="copyText(A.token)">复制密钥</button></p>`, '');
+  $('infoCopy').style.display = 'none';
+}
+async function changePw(){
+  const old = prompt('原密码'); if(old == null) return;
+  const pw = prompt('新密码（至少 6 位）'); if(pw == null) return;
+  try{ const r = await api('password', {token:A.token, old, password:pw}); A.token = r.token; saveJ(AUTH_KEY, A); toast('密码已修改'); }
+  catch(e){ toast(e.message, 3000); }
+}
+async function logout(){
+  const p = OB.length + JOBS.size;
+  if(!confirm(p ? `还有 ${p} 项没识别或没同步，退出后会丢失。确定退出？` : '退出登录？本机缓存会被清除，内容还在服务器上。')) return;
+  A = null; saveJ(AUTH_KEY, null);
+  for(const s of ['notes', 'jobs', 'kv']) await DB.clear(s);
+  N.clear(); JOBS.clear(); OB = []; UI.cur = null;
+  closeSheet('mSet'); renderAll(); showAuth();
+}
+
+/* 管理员 */
+let ADM = {cfg:null, invites:null, users:null, open:false};
+function renderAdmin(){
+  const box = $('adminBox');
+  if(!box) return;
+  if(!A || !A.user.admin){ box.innerHTML = ''; return; }
+  const c = ADM.cfg;
+  const models = ['~google/gemini-flash-latest', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro', 'openai/gpt-4.1-mini', 'qwen/qwen2.5-vl-72b-instruct'];
+  const lj = c && c.lastJob;
+  const cfgHtml = !c ? `<div class="muted">加载中…</div>` : `
+    <div class="field"><label>OpenRouter API Key ${c.keySet ? `<span class="tag ok">已设置 …${esc(c.keyTail)}</span>` : '<span class="tag bad">未设置</span>'}</label>
+      <input class="input" id="cfKey" type="password" autocomplete="off" placeholder="${c.keySet ? '留空则不修改' : 'sk-or-v1-…（openrouter.ai/keys 创建）'}"></div>
+    <div class="field"><label>识别文字的模型（要能看图）</label><input class="input" id="cfOcr" list="mList" value="${esc(c.config.ocrModel)}" autocapitalize="off"></div>
+    <div class="field"><label>起标题的模型</label><input class="input" id="cfTitle" list="mList" value="${esc(c.config.titleModel)}" autocapitalize="off"></div>
+    <datalist id="mList">${models.map(m => `<option value="${m}">`).join('')}</datalist>
+    <div class="muted small" style="margin-bottom:12px;line-height:1.7">定时任务：${c.trigger.active ? '✅ ' + esc(c.trigger.text) : '❌ 未创建（点保存会自动创建）'}　时区：${esc(c.config.tz)}<br>
+      ${lj ? `上次整理：${longTime(lj.at)}，起标题 ${lj.titled} 条，存 Drive ${lj.uploaded} 条${lj.failed ? `，<span style="color:var(--bad)">失败 ${lj.failed}</span>` : ''}` : '还没整理过'}</div>
+    <div class="row wrap"><button class="btn btn-primary btn-sm" onclick="saveCfg()">保存配置</button><button class="btn btn-sm" onclick="testKey()">测试 Key</button><button class="btn btn-sm" onclick="runJob_()">立即整理一次</button></div>`;
+  const inv = ADM.invites ? (ADM.invites.length ? ADM.invites.map(i => `<div class="li"><div><code>${esc(i.code)}</code> ${i.usedBy ? `<span class="muted">已被 ${esc(i.usedBy)} 使用</span>` : '<span class="tag ok">未使用</span>'}${i.note ? ` <span class="muted">${esc(i.note)}</span>` : ''}</div>
+      ${i.usedBy ? '' : `<div class="row"><button class="btn btn-sm" onclick="shareInvite('${i.code}')">复制</button><button class="btn btn-sm btn-danger" onclick="delInvite('${i.code}')">删</button></div>`}</div>`).join('') : '<div class="muted">还没有邀请码</div>') : '<div class="muted">加载中…</div>';
+  const users = ADM.users ? ADM.users.map(u => `<div class="li"><div>${esc(u.name)}${u.admin ? ' <span class="tag ok">管理员</span>' : ''}<div class="muted small">${u.lastSync ? '最近同步 ' + longTime(u.lastSync) : '还没同步过'}</div></div>
+      ${u.admin ? '' : `<button class="btn btn-sm" onclick="resetPw('${esc(u.name)}')">重置密码</button>`}</div>`).join('') : '<div class="muted">加载中…</div>';
+  box.innerHTML = `<div class="sec">管理员</div><div class="card"><div class="row between"><b>服务器与邀请码</b><button class="btn btn-sm" id="admToggle" onclick="ADM.open=!ADM.open;if(ADM.open)loadAdmin();renderAdmin()">${ADM.open ? '收起' : '展开'}</button></div></div>
+    ${ADM.open ? `<div class="sec">服务器配置</div><div class="card">${cfgHtml}</div>
+      <div class="sec">邀请码</div><div class="card"><div>${inv}</div><button class="btn btn-sm" style="margin-top:12px" onclick="newInvite()">＋ 生成邀请码</button></div>
+      <div class="sec">用户</div><div class="card">${users}</div>
+      <div class="sec">服务器代码</div><div class="card"><div class="row wrap"><button class="btn btn-sm" onclick="showSetup()">搭建 / 更新步骤</button><button class="btn btn-sm" onclick="copyScript()">复制 Code.gs</button></div></div>` : ''}`;
+}
+async function loadAdmin(){
+  try{
+    const [c, i, u] = await Promise.all([api('admin.config', {token:A.token}), api('invite.list', {token:A.token}), api('admin.users', {token:A.token})]);
+    ADM.cfg = c; ADM.invites = i.invites; ADM.users = u.users;
+  }catch(e){ toast(e.message, 3000); }
+  renderAdmin();
+}
+async function saveCfg(){
+  const set = {ocrModel:$('cfOcr').value, titleModel:$('cfTitle').value};
+  try{ set.tz = Intl.DateTimeFormat().resolvedOptions().timeZone; }catch(e){}
+  const k = $('cfKey').value.trim(); if(k) set.key = k;
+  try{ ADM.cfg = await api('admin.config', {token:A.token, set}); toast('配置已保存'); renderAdmin(); pull(); }
+  catch(e){ toast(e.message, 3500); }
+}
+async function testKey(){
+  try{ const r = await api('admin.test', {token:A.token}); toast(`Key 可用${r.limitRemaining != null ? '，剩余额度 $' + Number(r.limitRemaining).toFixed(2) : ''}${r.usage != null ? '，已用 $' + Number(r.usage).toFixed(2) : ''}`, 3500); }
+  catch(e){ toast(e.message, 4000); }
+}
+async function runJob_(){
+  toast('正在整理满 ' + SY.hours + ' 小时的内容…', 20000);
+  try{ const r = await api('admin.run', {token:A.token}); toast(`整理完成：起标题 ${r.result.titled} 条，存 Drive ${r.result.uploaded} 条${r.result.failed ? '，失败 ' + r.result.failed : ''}`, 3500); loadAdmin(); pull(); }
+  catch(e){ toast(e.message, 4000); }
+}
+async function newInvite(){
+  const note = prompt('备注（给谁的，可留空）', ''); if(note == null) return;
+  try{ const r = await api('invite.create', {token:A.token, note}); ADM.invites.unshift(r.invite); renderAdmin(); shareInvite(r.invite.code); }
+  catch(e){ toast(e.message); }
+}
+function shareInvite(code){
+  showInfo('邀请码 ' + code, `<p>把下面这段发给朋友：</p><p style="white-space:pre-wrap">${esc(inviteText(code))}</p>`, inviteText(code));
+}
+const inviteText = code => `「灵感」邀请码：${code}\niPhone：Safari 打开 ${SITE} → 分享 → 添加到主屏幕\nWindows：Edge 打开 ${SITE} → 安装\n安卓：下载安装 https://github.com/${REPO}/releases/latest/download/linggan.apk\n打开后点「注册」，填用户名、密码和邀请码即可。`;
+async function delInvite(code){ if(!confirm('删除邀请码 ' + code + '？')) return; try{ await api('invite.delete', {token:A.token, code}); ADM.invites = ADM.invites.filter(i => i.code !== code); renderAdmin(); }catch(e){ toast(e.message); } }
+async function resetPw(name){
+  if(!confirm(`重置 ${name} 的密码？`)) return;
+  try{ const r = await api('admin.reset', {token:A.token, target:name}); showInfo('新密码', `<p>${esc(name)} 的临时密码：</p><p style="font-size:22px"><code>${esc(r.password)}</code></p><p>让 TA 登录后在「设置」里修改密码。</p>`, r.password); }
+  catch(e){ toast(e.message); }
+}
+let infoCopy = '';
+function showInfo(title, html, copy){
+  $('infoTitle').textContent = title; $('infoBody').innerHTML = html; infoCopy = copy || '';
+  const b = $('infoCopy'); b.textContent = '复制'; b.onclick = () => copyText(infoCopy); b.style.display = copy ? 'flex' : 'none';
+  openSheet('mInfo');
+}
+function copyText(t){
+  const ok = () => toast('已复制');
+  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(ok, () => prompt('复制下面的内容：', t));
+  else prompt('复制下面的内容：', t);
+}
+async function copyScript(){
+  try{
+    const code = await (await fetch('google-drive/Code.gs', {cache:'no-store'})).text();
+    if(!code.includes('doPost')) throw 0;
+    await navigator.clipboard.writeText(code); toast('脚本代码已复制');
+  }catch(e){ location.href = 'google-drive/Code.gs'; }
+}
+function showSetup(){
+  showInfo('搭建服务器（管理员做一次）', `<ol>
+    <li>打开 <code>script.google.com</code> → 新建项目，把 <b>Code.gs</b> 全部粘贴进去（下面按钮可复制）</li>
+    <li>把代码顶部的 <code>SETUP_CODE</code> 改成你自己的一串字，保存</li>
+    <li>「部署」→「新建部署」→ 类型选「网页应用」，执行身份 <b>我</b>，访问权限 <b>任何人</b> → 部署并授权（提示未验证就点「高级 → 转至」）</li>
+    <li>复制 …/exec 结尾的网址，填到「服务器设置」</li>
+    <li>用 <code>SETUP_CODE</code> 作邀请码注册第一个账号（管理员）</li>
+    <li>在「设置 → 管理员 → 服务器配置」填 OpenRouter API Key 并保存，会自动创建每小时整理一次的定时任务</li>
+  </ol><p>以后更新代码：「部署 → 管理部署 → 铅笔 → 版本选新版本 → 部署」，网址不变。</p>`, '');
+  $('infoCopy').style.display = 'flex'; $('infoCopy').textContent = '复制 Code.gs'; $('infoCopy').onclick = copyScript;
+}
+
+/* ========== 登录 ========== */
+let aMode = 'login';
+function showAuth(){ $('auth').classList.add('show'); authMode(aMode); }
+function authMode(m){
+  aMode = m;
+  $('tabLogin').classList.toggle('on', m === 'login'); $('tabReg').classList.toggle('on', m === 'register');
+  $('invField').style.display = m === 'register' ? 'block' : 'none';
+  $('aBtn').textContent = m === 'login' ? '登录' : '注册';
+  $('aPass').autocomplete = m === 'login' ? 'current-password' : 'new-password';
+  $('aErr').textContent = serverUrl() ? '' : '请先在下面「服务器设置」里填服务器网址';
+}
+async function doAuth(){
+  const username = $('aUser').value.trim(), password = $('aPass').value, invite = $('aInv').value.trim();
+  if(!username || !password){ $('aErr').textContent = '请填写用户名和密码'; return; }
+  if(aMode === 'register' && !invite){ $('aErr').textContent = '注册需要邀请码'; return; }
+  $('aBtn').disabled = true; $('aErr').textContent = '';
+  try{
+    const r = await api(aMode, {username, password, invite});
+    A = {token:r.token, user:r.user, server:serverUrl()}; saveJ(AUTH_KEY, A);
+    $('auth').classList.remove('show'); $('aPass').value = '';
+    await DB.put('kv', 0, 'since');
+    toast(aMode === 'register' ? '注册成功' : '欢迎回来');
+    renderAll(); pull(); kickJobs(); takeShared();
+  }catch(e){ $('aErr').textContent = e.message; }
+  $('aBtn').disabled = false;
+}
+function openServer(){ $('srvUrl').value = serverUrl(); $('srvErr').textContent = ''; openSheet('mSrv'); }
+async function saveServer(){
+  const url = $('srvUrl').value.trim();
+  if(!/^https?:\/\//.test(url)){ $('srvErr').textContent = '网址不对，应该是 https://script.google.com/macros/s/…/exec'; return; }
+  $('srvErr').textContent = '测试中…';
+  try{
+    const r = await api('ping', {}, url);
+    if(r.app !== APP_ID) throw new Error('这个网址不是「灵感」的服务器');
+    localStorage.setItem(SRV_KEY, url); if(A){ A.server = url; saveJ(AUTH_KEY, A); }
+    closeSheet('mSrv'); toast(r.setup ? '连接成功！请用 SETUP_CODE 注册管理员账号' : '连接成功');
+    if(r.setup) authMode('register'); else authMode(aMode);
+  }catch(e){ $('srvErr').textContent = e.message; }
+}
+
+/* ========== 拖拽 / 粘贴（电脑上） ========== */
+let dragN = 0;
+const hasFiles = e => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+window.addEventListener('dragenter', e => { if(!hasFiles(e)) return; e.preventDefault(); dragN++; $('drop').classList.add('show'); });
+window.addEventListener('dragover', e => { if(hasFiles(e)) e.preventDefault(); });
+window.addEventListener('dragleave', e => { if(!hasFiles(e)) return; if(--dragN <= 0){ dragN = 0; $('drop').classList.remove('show'); } });
+window.addEventListener('drop', e => { if(!hasFiles(e)) return; e.preventDefault(); dragN = 0; $('drop').classList.remove('show'); addFiles(e.dataTransfer.files); });
+document.addEventListener('paste', e => {
+  const files = [...((e.clipboardData && e.clipboardData.files) || [])].filter(f => /^image\//.test(f.type));
+  if(!files.length) return;
+  e.preventDefault(); addFiles(files);
+});
+
+/* ========== 从别的 App 分享进来的截屏 ========== */
+// 安卓 PWA：manifest 的 share_target → sw.js 先存进缓存 → 打开 ?share=1
+async function takeShared(){
+  if(!A) return;
+  try{
+    if(/[?&]share=1/.test(location.search)){
+      history.replaceState(history.state, '', location.pathname);
+      if(window.caches){
+        const c = await caches.open(APP_ID + '-share');
+        const keys = await c.keys(), files = [];
+        for(const k of keys){ const r = await c.match(k); if(r) files.push(await r.blob()); await c.delete(k); }
+        if(files.length) addFiles(files);
+      }
+    }
+  }catch(e){ toast('读取分享的图片失败：' + e.message, 3000); }
+  takeNativeShared();
+}
+// 安卓 App：原生插件 ShareIn 把分享进来的图片交给网页
+let shareIn = null;
+async function takeNativeShared(){
+  if(!isNative() || !A) return;
+  try{
+    if(!shareIn && Capacitor.registerPlugin){ shareIn = Capacitor.registerPlugin('ShareIn'); shareIn.addListener('shared', takeNativeShared); }
+    if(!shareIn) return;
+    const r = await shareIn.take();
+    const files = (r && r.images || []).map(x => { const bin = atob(x.data); const u = new Uint8Array(bin.length); for(let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], {type:x.mime || 'image/jpeg'}); });
+    if(files.length) addFiles(files);
+  }catch(e){}
+}
+
+/* ========== 页面 ========== */
+function renderAll(){ renderSync(); renderNotice(); renderJobs(); renderList(); renderNote(); }
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden){ hiddenAt = Date.now(); flushEdit(); return; }
+  if(A && Date.now() - hiddenAt > 5000){ pull(); kickJobs(); }
+});
+window.addEventListener('pagehide', flushEdit);
+window.addEventListener('resize', () => { if(wide()) document.body.classList.remove('noting'); });
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape'){ const open = [...document.querySelectorAll('.mask.show')]; if(open.length) closeSheet(open[open.length - 1]); else if(UI.selecting) toggleSelect(false); }
+});
+
+/* ========== 安卓原生（Capacitor） ========== */
+const NP = n => isNative() && (window[n] || null);
+let latestApk = null;
+function nativeSetup(){
+  if(!isNative()) return;
+  const CA = NP('capacitorApp');
+  if(CA && CA.App){
+    CA.App.addListener('backButton', () => {
+      const open = [...document.querySelectorAll('.mask.show')];
+      if(open.length){ closeSheet(open[open.length - 1]); return; }
+      if(document.body.classList.contains('noting')){ closeNote(); return; }
+      if(UI.selecting){ toggleSelect(false); return; }
+      CA.App.minimizeApp ? CA.App.minimizeApp() : CA.App.exitApp();
+    });
+    CA.App.addListener('pause', () => { hiddenAt = Date.now(); flushEdit(); });
+    CA.App.addListener('resume', () => { if(A){ pull(); kickJobs(); takeNativeShared(); } });
+  }
+  checkUpdate();
+}
+async function checkUpdate(){
+  try{
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {headers:{Accept:'application/vnd.github+json'}});
+    const j = await r.json(), n = Number(String(j.tag_name || '').replace('android-', ''));
+    const a = (j.assets || []).find(x => /\.apk$/.test(x.name));
+    if(n > APP_BUILD && a){ latestApk = {n, url:a.browser_download_url}; toast(`有新版本 1.${n}，可在「设置」里更新`); }
+  }catch(e){}
+}
+
+/* ========== 启动 ========== */
+async function boot(){
+  SY.hours = loadJ(APP_ID + '-hours', 24);
+  try{
+    (await DB.all('notes')).forEach(n => N.set(n.id, n));
+    (await DB.all('jobs')).forEach(j => { j.state = j.state === 'fail' ? 'fail' : 'wait'; delete j.thumbUrl; JOBS.set(j.id, j); });
+    OB = (await DB.get('kv', 'outbox')) || [];
+    applyOutboxLocal();
+  }catch(e){ toast('本机存储打不开：' + (e && e.message || e), 4000); }
+  if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  nativeSetup();
+  renderAll();
+  if(!A){ showAuth(); return; }
+  pull(); kickJobs(); takeShared();
+}
+if('serviceWorker' in navigator && location.protocol === 'https:' && !isNative()) navigator.serviceWorker.register('sw.js').catch(() => {});
+boot();
+</script>
+</body>
+</html>
