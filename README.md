@@ -15,13 +15,13 @@
   - Windows：也可以把截屏**拖进窗口**，或者 **Ctrl+V 粘贴**
   - 安卓：相册里选中截屏 → **分享 → 灵感**，打开就开始识别（APK 和 Chrome 安装的 PWA 都支持）
   - iPhone：可以设一个「快捷指令」，相册里 **分享 → 存到灵感**，后台识别（App「设置 → 看步骤」里有详细步骤）
-- **只提取文字**：服务器调 OpenRouter 的看图模型（默认 `~google/gemini-flash-latest`），只要正文，忽略状态栏、按钮、点赞数、广告；保留作者昵称、发布时间、聊天里谁说的话。同时判断来源（X / 小红书 / 微信 / Telegram / 微博 / 抖音 / 知乎 / 其他）
+- **只提取文字**：服务器调 OpenRouter 的看图模型（默认 `google/gemini-2.5-flash`，关掉思考），只要正文，忽略状态栏、按钮、点赞数、广告；保留作者昵称、发布时间、聊天里谁说的话。同时判断来源（X / 小红书 / 微信 / Telegram / 微博 / 抖音 / 知乎 / 其他）
   - 发送前在手机上压缩成 JPEG；**长截屏**自动切成几段一起识别（重叠部分只保留一次）
   - 没有文字的截屏直接跳过
 - **图片不留档**：截屏只在识别时经过服务器内存，识别完就丢；手机上排队的截屏识别成功后立刻删除。任何地方都不保存截屏
 - **像备忘录**：按「今天 / 昨天 / 过去 7 天 / 过去 30 天 / 按月」分组；每张截屏单独一条；点开直接改文字和标题，自动保存；搜索（高亮）；按来源筛选；电脑上左右两栏
 - **合并 / 删除**：点「选择」勾几条 → 「合并」按提取时间从早到晚拼成一条（记作 N 张截屏）；「删除」同时把 Drive 里的文件移到回收站
-- **24 小时后**：服务器每小时整理一次，满 24 小时的内容让 AI 起一个 6–18 字的标题（自己写过标题的不改），然后存成 Markdown 上传到 Google Drive。之后再改或合并，Drive 里的文件会在一小时内跟着更新
+- **24 小时后**：服务器每小时整理一次，满 24 小时的内容让 AI（默认 `google/gemini-2.5-flash-lite`）起一个 6–18 字的标题（自己写过标题的不改），然后存成 Markdown 上传到 Google Drive。之后再改或合并，Drive 里的文件会在一小时内跟着更新
 - **离线**：没网时截屏先排队，联网自动识别；识别失败会自动重试，也可以手动「重试 / 放弃」；关掉 App 再开队列也还在
 - **账号**：注册需要**一次性邀请码**（管理员在 App 里生成）；登录同一账号的 iPhone、安卓、Windows 自动同步；每个账号的内容互相看不到
 
@@ -48,7 +48,7 @@
 - 手机 / 电脑本机：IndexedDB 里缓存内容，和还没识别完的截屏（识别完就删）
 
 ## 费用
-每张截屏一次看图请求，每条内容再一次很短的起标题请求，都用便宜的 Gemini Flash。实际花费在 OpenRouter 后台看，App「管理员 → 测试 Key」也会显示已用和剩余额度。
+每张截屏一次看图请求（`google/gemini-2.5-flash`，不思考），每条内容再一次很短的起标题请求（`google/gemini-2.5-flash-lite`，不思考）。大约每张截屏 0.002 美元，5 美元能处理两三千张。实际花费在 OpenRouter 后台看，App「管理员 → 测试 Key」也会显示已用和剩余额度。
 
 ## 安卓版构建
 推送到 main 后，`.github/workflows/android.yml` 会：`npm ci` → `scripts/build-www.mjs`（把网页和 Capacitor 脚本打包进 `www/`）→ `npx cap add android` → 覆盖 `android-res/` 里的图标和启动图 → `scripts/patch-android.py`（给 `AndroidManifest.xml` 加上接收图片分享的 intent-filter，换上 `android-native/` 里的 `MainActivity` 和 `ShareInPlugin`）→ `gradlew assembleRelease` → 用 `android-signing/linggan.jks` 签名 → 发布到 Releases。

@@ -118,7 +118,7 @@ ok(await waitFor(async () => (await jobs(pc)).length === 0, 20000), `10 张全�
 let ns = await notes(pc);
 ok(ns.length === 9, `生成 ${ns.length} 条内容（10 张里 1 张没有文字被跳过）`);
 ok(OR.ocr.some(o => o.parts === 3), '长截屏 3 段一起发给模型识别');
-ok(OR.ocr.every(o => o.model === '~google/gemini-flash-latest' && o.imgs.every(i => i.mime === 'image/jpeg')), '识别请求：模型 ' + OR.ocr[0].model + '，图片压成 JPEG');
+ok(OR.ocr.every(o => o.model === 'google/gemini-2.5-flash' && o.effort === 'none' && o.imgs.every(i => i.mime === 'image/jpeg')), '识别请求：模型 ' + OR.ocr[0].model + '，关掉思考（effort=' + OR.ocr[0].effort + '），图片压成 JPEG');
 ok(OR.ocr.every(o => o.imgs.every(i => i.bytes < 900000)), '每段图片都压缩到 900KB 以下：最大 ' + Math.max(...OR.ocr.flatMap(o => o.imgs.map(i => i.bytes))) + ' 字节');
 ok(new Set(ns.map(n => n.source)).size >= 3, '识别出来源：' + [...new Set(ns.map(n => n.source))].join('、'));
 ok(ns.every(n => !n.title && !n.drive), '刚提取的内容还没有标题、没上传 Drive');
@@ -214,6 +214,17 @@ await sleep(300);
 await pc.screenshot({ path: path.join(out, '9-titled-pc.png') });
 const res2 = GAS.hourlyJob();
 ok(res2.uploaded === 0, '已经整理过的不会重复上传');
+ok(OR.titles.length >= 5 && OR.titles.every(t => t.model === 'google/gemini-2.5-flash-lite' && t.effort === 'none'), '起标题：模型 google/gemini-2.5-flash-lite，关掉思考');
+// 以前保存过旧默认模型的配置：自动换成新的便宜模型
+GAS.setJSON_('config', Object.assign(GAS.cfg_(), { ocrModel: '~google/gemini-flash-latest', titleModel: '~google/gemini-flash-latest' }));
+ok(GAS.cfg_().ocrModel === 'google/gemini-2.5-flash' && GAS.cfg_().titleModel === 'google/gemini-2.5-flash-lite', '旧配置里的 ~google/gemini-flash-latest 自动换成新的便宜模型');
+// 换成不允许关思考的模型（Gemini 3）：自动退回最少思考，照样能识别
+GAS.setJSON_('config', Object.assign(GAS.cfg_(), { ocrModel: 'google/gemini-3.5-flash' }));
+const nCalls = OR.calls.length;
+const g3 = GAS.ocr_([{ data: Buffer.alloc(5000, 7).toString('base64'), mime: 'image/jpeg' }]);
+const tried = OR.calls.slice(nCalls).map(c => c.effort).join('→');
+ok(g3.text && tried === 'none→minimal', '模型不允许关思考时自动改用最少思考重试：' + tried);
+GAS.setJSON_('config', Object.assign(GAS.cfg_(), { ocrModel: 'google/gemini-2.5-flash' }));
 
 // 已上传的再修改 → 下次整理时更新 Drive 文件（不新建）
 const tgt = ns.find(n => n.id === pid);

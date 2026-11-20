@@ -52,7 +52,7 @@ function fmtDate(d, tz, fmt) {
 }
 
 // ocr：每次识别的记录；titles：起标题的记录。小于 2KB 的图当作“没有文字”。
-export const OR = { ocr: [], titles: [], failOcr: false, delay: 300 };
+export const OR = { ocr: [], titles: [], calls: [], failOcr: false, delay: 300 };
 const SRC = ['X', '小红书', '微信', 'Telegram'];
 const ctx = {
   console,
@@ -76,18 +76,22 @@ const ctx = {
     const p = JSON.parse(o.payload);
     if (url.endsWith('/chat/completions')) {
       const c = p.messages[0].content;
+      const effort = p.reasoning && p.reasoning.effort;
+      OR.calls.push({ model: p.model, effort, image: Array.isArray(c) });
+      // 模拟 Gemini 3：不允许关掉思考
+      if (/gemini-3/.test(p.model) && effort === 'none') return resp(400, { error: { message: 'Reasoning is mandatory for this endpoint and cannot be disabled.' } });
       if (Array.isArray(c)) {
         const imgs = c.filter(x => x.type === 'image_url').map(x => {
           const m = x.image_url.url.match(/^data:([^;]+);base64,(.*)$/);
           return { mime: m[1], bytes: Buffer.from(m[2], 'base64').length };
         });
         const k = OR.ocr.length;
-        OR.ocr.push({ model: p.model, parts: imgs.length, imgs, prompt: c[0].text });
+        OR.ocr.push({ model: p.model, effort, parts: imgs.length, imgs, prompt: c[0].text });
         if (OR.failOcr) return resp(502, { error: { message: 'provider down' } });
         if (imgs.every(i => i.bytes < 2500)) return resp(200, { choices: [{ message: { content: '来源：其他\n\n（无文字）' } }] });
         return resp(200, { choices: [{ message: { content: `来源：${SRC[k % 4]}\n\n第${k + 1}张截屏 共${imgs.length}段\n今天要记得买牛奶。\n关键词 苹果${k + 1}` } }] });
       }
-      OR.titles.push({ model: p.model, prompt: c });
+      OR.titles.push({ model: p.model, effort, prompt: c });
       const m = String(c).match(/关键词 (苹果\d+)/);
       return resp(200, { choices: [{ message: { content: '「' + (m ? m[1] + '的笔记' : '合并的笔记') + '」' } }] });
     }

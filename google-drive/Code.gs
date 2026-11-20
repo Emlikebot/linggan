@@ -30,8 +30,8 @@ const HASH_ROUNDS = 400;
 const OR_BASE = 'https://openrouter.ai/api/v1';
 const MAX_PARTS = 12;                 // 一张长截屏最多切成几段
 const DEFAULT_CFG = {
-  ocrModel: '~google/gemini-flash-latest',     // 识别文字用的模型（要能看图）
-  titleModel: '~google/gemini-flash-latest',   // 起标题用的模型
+  ocrModel: 'google/gemini-2.5-flash',         // 识别文字用的模型（要能看图；关掉思考，又快又便宜）
+  titleModel: 'google/gemini-2.5-flash-lite',  // 起标题用的模型（最便宜的就够用）
   tz: 'Asia/Shanghai',                         // 文件名里的日期用这个时区（保存配置时自动用手机的时区）
   archiveHours: 24                             // 提取后多少小时起标题、上传 Drive
 };
@@ -302,7 +302,7 @@ function ocr_(imgs) {
     const mime = /^image\/(png|jpeg|jpg|webp|gif)$/i.test(String(im.mime || '')) ? String(im.mime).toLowerCase().replace('jpg', 'jpeg') : 'image/jpeg';
     return { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + String(im.data).replace(/^data:[^,]*,/, '') } };
   }));
-  const j = chat_(c.ocrModel, content, 'low', 0);
+  const j = chat_(c.ocrModel, content, 'none', 0);      // 照抄文字不需要思考
   if (j.err) fail_('识别失败：' + j.err, 'ocr');
   return parseOcr_(j.text);
 }
@@ -329,12 +329,18 @@ function normSource_(s) {
   return SOURCES.indexOf(s) >= 0 ? s : '其他';
 }
 
-/* 调 OpenRouter 聊天接口，返回 {text} 或 {err} */
+/* 调 OpenRouter 聊天接口，返回 {text} 或 {err}。
+   effort = 'none' 表示关掉思考；有的模型（比如 Gemini 3）不允许关，会自动退回最少思考再试一次 */
 function chat_(model, content, effort, temperature) {
+  const r = chatOnce_(model, content, effort, temperature);
+  if (r.err && effort === 'none' && r.code === 400 && /reason|think/i.test(r.err)) return chatOnce_(model, content, 'minimal', temperature);
+  return r;
+}
+function chatOnce_(model, content, effort, temperature) {
   const k = orKey_();
   if (!k) return { err: '还没配置 OpenRouter API Key' };
   const payload = { model: model, messages: [{ role: 'user', content: content }] };
-  if (effort) payload.reasoning = { effort: effort };
+  if (effort) payload.reasoning = { effort: effort, exclude: true };
   if (temperature != null) payload.temperature = temperature;
   try {
     const r = UrlFetchApp.fetch(OR_BASE + '/chat/completions', {
@@ -346,7 +352,7 @@ function chat_(model, content, effort, temperature) {
     const msg = j && j.choices && j.choices[0] && j.choices[0].message;
     let out = msg && msg.content;
     if (Array.isArray(out)) out = out.map(function (p) { return p && p.text || ''; }).join('');
-    if (code !== 200 || typeof out !== 'string') return { err: '（' + code + '）' + String((j && j.error && (j.error.message || j.error)) || txt).slice(0, 300) };
+    if (code !== 200 || typeof out !== 'string') return { code: code, err: '（' + code + '）' + String((j && j.error && (j.error.message || j.error)) || txt).slice(0, 300) };
     return { text: out };
   } catch (e) {
     return { err: String(e && e.message || e).slice(0, 300) };
@@ -414,7 +420,7 @@ function hourlyJob() {
 function makeTitle_(n) {
   const prompt = '给下面这段从手机截屏里提取的文字起一个简短的中文标题：6–18 个字，概括核心内容，方便以后搜索。\n' +
     '只输出标题本身，不加引号、书名号、句号，不要任何解释。\n\n来源：' + (n.source || '其他') + '\n\n' + String(n.text || '').slice(0, 8000);
-  const j = chat_(cfg_().titleModel, prompt, 'low', 0.3);
+  const j = chat_(cfg_().titleModel, prompt, 'none', 0.3);
   if (j.err) { console.error('起标题失败：' + j.err); return ''; }
   return cleanTitle_(String(j.text || '').trim().split('\n')[0]);
 }
@@ -480,7 +486,13 @@ function writeNotes_(name, N) {
 function props_() { return PropertiesService.getScriptProperties(); }
 function getJSON_(k) { const v = props_().getProperty(k); return v ? JSON.parse(v) : null; }
 function setJSON_(k, o) { props_().setProperty(k, JSON.stringify(o)); }
-function cfg_() { return Object.assign({}, DEFAULT_CFG, getJSON_('config') || {}); }
+const OLD_DEFAULTS = ['~google/gemini-flash-latest'];   // 以前的默认模型：保存过配置的也自动换成新的便宜模型
+function cfg_() {
+  const c = Object.assign({}, DEFAULT_CFG, getJSON_('config') || {});
+  if (OLD_DEFAULTS.indexOf(c.ocrModel) >= 0) c.ocrModel = DEFAULT_CFG.ocrModel;
+  if (OLD_DEFAULTS.indexOf(c.titleModel) >= 0) c.titleModel = DEFAULT_CFG.titleModel;
+  return c;
+}
 function orKey_() { return props_().getProperty('OPENROUTER_API_KEY') || ''; }
 function getUser_(name) { return getJSON_('user:' + String(name).toLowerCase()); }
 function putUser_(u) { setJSON_('user:' + u.name.toLowerCase(), u); }

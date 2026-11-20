@@ -865,12 +865,12 @@ function renderAdmin(){
   if(!box) return;
   if(!A || !A.user.admin){ box.innerHTML = ''; return; }
   const c = ADM.cfg;
-  const models = ['~google/gemini-flash-latest', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro', 'openai/gpt-4.1-mini', 'qwen/qwen2.5-vl-72b-instruct'];
+  const models = ['google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite', '~google/gemini-flash-latest', 'google/gemini-2.5-pro', 'qwen/qwen2.5-vl-72b-instruct'];
   const lj = c && c.lastJob;
   const cfgHtml = !c ? `<div class="muted">加载中…</div>` : `
     <div class="field"><label>OpenRouter API Key ${c.keySet ? `<span class="tag ok">已设置 …${esc(c.keyTail)}</span>` : '<span class="tag bad">未设置</span>'}</label>
       <input class="input" id="cfKey" type="password" autocomplete="off" placeholder="${c.keySet ? '留空则不修改' : 'sk-or-v1-…（openrouter.ai/keys 创建）'}"></div>
-    <div class="field"><label>识别文字的模型（要能看图）</label><input class="input" id="cfOcr" list="mList" value="${esc(c.config.ocrModel)}" autocapitalize="off"></div>
+    <div class="field"><label>识别文字的模型（要能看图；已关掉思考，省钱又快）</label><input class="input" id="cfOcr" list="mList" value="${esc(c.config.ocrModel)}" autocapitalize="off"></div>
     <div class="field"><label>起标题的模型</label><input class="input" id="cfTitle" list="mList" value="${esc(c.config.titleModel)}" autocapitalize="off"></div>
     <datalist id="mList">${models.map(m => `<option value="${m}">`).join('')}</datalist>
     <div class="muted small" style="margin-bottom:12px;line-height:1.7">定时任务：${c.trigger.active ? '✅ ' + esc(c.trigger.text) : '❌ 未创建（点保存会自动创建）'}　时区：${esc(c.config.tz)}<br>
