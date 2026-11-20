@@ -1,5 +1,5 @@
 // 离线缓存 + 接收安卓「分享」进来的截屏。修改文件后请递增版本号
-const CACHE = 'linggan-v1';
+const CACHE = 'linggan-v2';
 const SHARE = 'linggan-share';
 const ASSETS = [
   './',
