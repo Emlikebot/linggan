@@ -90,7 +90,7 @@ ok(js.length === 10, `队列里有 ${js.length} 张`);
 ok(js.filter(j => j.parts === 3).length === 1 && js.filter(j => j.parts === 1).length === 9, '6000 像素高的长截屏切成 3 段、普通截屏 1 段：' + JSON.stringify(js.map(j => j.parts)));
 await waitFor(async () => (await jobs(pc)).every(j => j.err), 10000);
 js = await jobs(pc);
-ok(js.every(j => j.state === 'wait' && /OpenRouter/.test(j.err)), '没配 Key 时截屏留在队列里等待：' + js[0].err);
+ok(js.every(j => j.state === 'wait' && /API Key/.test(j.err)), '没配 Key 时截屏留在队列里等待：' + js[0].err);
 await pc.evaluate(() => pull()); await sleep(400);
 ok(await pc.evaluate(() => !!document.querySelector('#notice .card')), '显示“服务器还不能识别”提醒');
 ok(!LOG.includes('PREFLIGHT'), '请求没有触发 CORS 预检（Apps Script 不支持预检）');
@@ -99,15 +99,16 @@ await pc.screenshot({ path: path.join(out, '1-queue-pc.png') });
 // ---------- 管理员配置 Key ----------
 await pc.click('button[aria-label=设置]');
 await pc.click('#admToggle'); await sleep(500);
-await pc.fill('#cfKey', 'sk-or-test');
+ok(await pc.$eval('#pvG', b => b.classList.contains('on')), '默认用 Gemini 官方 API');
+await pc.fill('#cfGKey', 'AIza-test');
 await pc.click('text=保存配置'); await sleep(600);
 const tr = triggers();
 ok(tr.length === 1 && tr[0].h === 'hourlyJob' && tr[0].every === 1, '保存配置后自动创建每小时一次的整理任务：' + JSON.stringify(tr));
-ok(GAS.PropertiesService.getScriptProperties().getProperty('OPENROUTER_API_KEY') === 'sk-or-test', 'Key 存进了脚本属性');
+ok(GAS.PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY') === 'AIza-test', 'Gemini Key 存进了脚本属性');
 const cfgResp = await pc.evaluate(() => api('admin.config', { token: A.token }));
-ok(!JSON.stringify(cfgResp).includes('sk-or-test') && cfgResp.keyTail === 'test', '读取配置时不会返回完整 Key');
-await pc.click('text=测试 Key'); await sleep(300);
-ok((await pc.textContent('#toast')).includes('Key 可用'), '测试 Key：' + await pc.textContent('#toast'));
+ok(!JSON.stringify(cfgResp).includes('AIza-test') && cfgResp.gKeyTail === 'test', '读取配置时不会返回完整 Key');
+await pc.click('text=测试 Key'); await sleep(500);
+ok((await pc.textContent('#toast')).includes('Gemini Key 可用'), '测试 Key：' + await pc.textContent('#toast'));
 await pc.screenshot({ path: path.join(out, '2-settings-admin.png') });
 await pc.click('#mSet .shead .tbtn');
 
@@ -118,7 +119,8 @@ ok(await waitFor(async () => (await jobs(pc)).length === 0, 20000), `10 张全�
 let ns = await notes(pc);
 ok(ns.length === 9, `生成 ${ns.length} 条内容（10 张里 1 张没有文字被跳过）`);
 ok(OR.ocr.some(o => o.parts === 3), '长截屏 3 段一起发给模型识别');
-ok(OR.ocr.every(o => o.model === 'google/gemini-2.5-flash' && o.effort === 'none' && o.imgs.every(i => i.mime === 'image/jpeg')), '识别请求：模型 ' + OR.ocr[0].model + '，关掉思考（effort=' + OR.ocr[0].effort + '），图片压成 JPEG');
+ok(OR.ocr.every(o => o.api === 'gemini' && o.model === 'gemini-3.5-flash-lite' && o.thinking && o.thinking.thinkingLevel === 'minimal' && o.imgs.every(i => i.mime === 'image/jpeg')), '识别请求走 Gemini 官方 API：模型 ' + OR.ocr[0].model + '，最少思考，图片压成 JPEG');
+ok((await notes(pc)).every(n => !/hmm/.test(n.text)), '模型的思考内容不会混进提取的文字');
 ok(OR.ocr.every(o => o.imgs.every(i => i.bytes < 900000)), '每段图片都压缩到 900KB 以下：最大 ' + Math.max(...OR.ocr.flatMap(o => o.imgs.map(i => i.bytes))) + ' 字节');
 ok(new Set(ns.map(n => n.source)).size >= 3, '识别出来源：' + [...new Set(ns.map(n => n.source))].join('、'));
 ok(ns.every(n => !n.title && !n.drive), '刚提取的内容还没有标题、没上传 Drive');
@@ -214,17 +216,30 @@ await sleep(300);
 await pc.screenshot({ path: path.join(out, '9-titled-pc.png') });
 const res2 = GAS.hourlyJob();
 ok(res2.uploaded === 0, '已经整理过的不会重复上传');
-ok(OR.titles.length >= 5 && OR.titles.every(t => t.model === 'google/gemini-2.5-flash-lite' && t.effort === 'none'), '起标题：模型 google/gemini-2.5-flash-lite，关掉思考');
-// 以前保存过旧默认模型的配置：自动换成新的便宜模型
-GAS.setJSON_('config', Object.assign(GAS.cfg_(), { ocrModel: '~google/gemini-flash-latest', titleModel: '~google/gemini-flash-latest' }));
-ok(GAS.cfg_().ocrModel === 'google/gemini-2.5-flash' && GAS.cfg_().titleModel === 'google/gemini-2.5-flash-lite', '旧配置里的 ~google/gemini-flash-latest 自动换成新的便宜模型');
-// 换成不允许关思考的模型（Gemini 3）：自动退回最少思考，照样能识别
+ok(OR.titles.length >= 5 && OR.titles.every(t => t.api === 'gemini' && t.model === 'gemini-3.5-flash-lite' && t.thinking.thinkingLevel === 'minimal'), '起标题：Gemini 官方 gemini-3.5-flash-lite，最少思考');
+// 选 2.5 系列：用 thinkingBudget=0 完全关掉思考
+GAS.setJSON_('config', Object.assign(GAS.cfg_(), { gOcrModel: 'gemini-2.5-flash' }));
+let nCalls = OR.calls.length;
+GAS.ocr_([{ data: Buffer.alloc(5000, 7).toString('base64'), mime: 'image/jpeg' }]);
+ok(JSON.stringify(OR.calls[nCalls].thinking) === '{"thinkingBudget":0}', 'Gemini 2.5 模型：thinkingBudget=0 关掉思考');
+// 不支持设思考的模型：自动去掉设置重试
+GAS.setJSON_('config', Object.assign(GAS.cfg_(), { gOcrModel: 'gemini-9-nothink' }));
+nCalls = OR.calls.length;
+const g9 = GAS.ocr_([{ data: Buffer.alloc(5000, 7).toString('base64'), mime: 'image/jpeg' }]);
+ok(g9.text && OR.calls.length - nCalls === 2 && OR.calls[nCalls + 1].thinking === null, '模型不支持设思考时自动用默认设置重试');
+GAS.setJSON_('config', Object.assign(GAS.cfg_(), { gOcrModel: 'gemini-3.5-flash-lite' }));
+// 切回 OpenRouter 也照样能用（以前保存过旧默认模型的会自动换成便宜的）
+GAS.PropertiesService.getScriptProperties().setProperty('OPENROUTER_API_KEY', 'sk-or-test');
+GAS.setJSON_('config', Object.assign(GAS.cfg_(), { provider: 'openrouter', ocrModel: '~google/gemini-flash-latest', titleModel: '~google/gemini-flash-latest' }));
+ok(GAS.cfg_().ocrModel === 'google/gemini-2.5-flash' && GAS.cfg_().titleModel === 'google/gemini-2.5-flash-lite', 'OpenRouter 旧配置里的 ~google/gemini-flash-latest 自动换成便宜模型');
+nCalls = OR.calls.length;
+const orr = GAS.ocr_([{ data: Buffer.alloc(5000, 7).toString('base64'), mime: 'image/jpeg' }]);
+ok(orr.text && OR.calls[nCalls].api !== 'gemini' && OR.calls[nCalls].model === 'google/gemini-2.5-flash' && OR.calls[nCalls].effort === 'none', '切到 OpenRouter：走 OpenRouter、关掉思考');
 GAS.setJSON_('config', Object.assign(GAS.cfg_(), { ocrModel: 'google/gemini-3.5-flash' }));
-const nCalls = OR.calls.length;
-const g3 = GAS.ocr_([{ data: Buffer.alloc(5000, 7).toString('base64'), mime: 'image/jpeg' }]);
-const tried = OR.calls.slice(nCalls).map(c => c.effort).join('→');
-ok(g3.text && tried === 'none→minimal', '模型不允许关思考时自动改用最少思考重试：' + tried);
-GAS.setJSON_('config', Object.assign(GAS.cfg_(), { ocrModel: 'google/gemini-2.5-flash' }));
+nCalls = OR.calls.length;
+GAS.ocr_([{ data: Buffer.alloc(5000, 7).toString('base64'), mime: 'image/jpeg' }]);
+ok(OR.calls.slice(nCalls).map(c => c.effort).join('→') === 'none→minimal', 'OpenRouter 上不允许关思考的模型自动改用最少思考');
+GAS.setJSON_('config', Object.assign(GAS.cfg_(), { provider: 'gemini', ocrModel: 'google/gemini-2.5-flash' }));
 
 // 已上传的再修改 → 下次整理时更新 Drive 文件（不新建）
 const tgt = ns.find(n => n.id === pid);

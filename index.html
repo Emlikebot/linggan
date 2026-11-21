@@ -424,7 +424,7 @@ async function addFiles(list){
 const jobRec = j => ({id:j.id, t:j.t, parts:j.parts, thumb:j.thumb, state:j.state === 'run' ? 'wait' : j.state, tries:j.tries, err:j.err, nextTry:j.nextTry});
 function pickImages(){ if(!A){ showAuth(); return; } $('picker').click(); }
 
-/* ========== 识别（服务器调 OpenRouter，只拿回文字） ========== */
+/* ========== 识别（服务器调 Gemini 官方 API 或 OpenRouter，只拿回文字） ========== */
 let jobRunning = 0;
 function blobB64(blob){
   return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.onerror = () => rej(fr.error); fr.readAsDataURL(blob); });
@@ -506,7 +506,7 @@ async function pull(){
     applyOutboxLocal();
     SY.ok = Date.now(); SY.err = ''; SY.code = ''; SY.ready = r.ready; SY.hours = r.archiveHours == null ? 24 : r.archiveHours;
     saveJ(APP_ID + '-hours', SY.hours);
-    if(r.ready) JOBS.forEach(j => { if(j.state === 'wait' && /OpenRouter/.test(j.err || '')) j.nextTry = 0; });
+    if(r.ready) JOBS.forEach(j => { if(j.state === 'wait' && /API Key/.test(j.err || '')) j.nextTry = 0; });
     kickJobs();
   }catch(e){
     SY.err = e.message; SY.code = e.code;
@@ -820,7 +820,7 @@ function renderSettings(){
 }
 function renderNotice(){
   let h = '';
-  if(A && SY.ok && !SY.ready) h = `<div class="card" style="margin-bottom:6px"><b>⚠️ 服务器还不能识别截屏</b><div class="muted" style="margin-top:6px;line-height:1.6">${A.user.admin ? '请到「设置 → 管理员 → 服务器配置」填写 OpenRouter API Key。' : '管理员还没配置 OpenRouter API Key，截屏会先排队，配好后自动识别。'}</div></div>`;
+  if(A && SY.ok && !SY.ready) h = `<div class="card" style="margin-bottom:6px"><b>⚠️ 服务器还不能识别截屏</b><div class="muted" style="margin-top:6px;line-height:1.6">${A.user.admin ? '请到「设置 → 管理员 → 服务器配置」填写 Gemini API Key。' : '管理员还没配置 API Key，截屏会先排队，配好后自动识别。'}</div></div>`;
   $('notice').innerHTML = h;
 }
 function showShortcut(){
@@ -865,14 +865,26 @@ function renderAdmin(){
   if(!box) return;
   if(!A || !A.user.admin){ box.innerHTML = ''; return; }
   const c = ADM.cfg;
-  const models = ['google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite', '~google/gemini-flash-latest', 'google/gemini-2.5-pro', 'qwen/qwen2.5-vl-72b-instruct'];
+  const gModels = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  const oModels = ['google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite', '~google/gemini-flash-latest', 'qwen/qwen2.5-vl-72b-instruct'];
   const lj = c && c.lastJob;
+  const pv = ADM.pv || (c && c.config.provider) || 'gemini';
+  const tag = (set, tail) => set ? `<span class="tag ok">已设置 …${esc(tail)}</span>` : '<span class="tag bad">未设置</span>';
   const cfgHtml = !c ? `<div class="muted">加载中…</div>` : `
-    <div class="field"><label>OpenRouter API Key ${c.keySet ? `<span class="tag ok">已设置 …${esc(c.keyTail)}</span>` : '<span class="tag bad">未设置</span>'}</label>
+    <div class="field"><label>用哪家的 API</label>
+      <div class="seg" style="margin:0"><button class="${pv === 'gemini' ? 'on' : ''}" id="pvG" onclick="ADM.pv='gemini';renderAdmin()">Gemini 官方</button><button class="${pv === 'openrouter' ? 'on' : ''}" id="pvO" onclick="ADM.pv='openrouter';renderAdmin()">OpenRouter</button></div></div>
+    ${pv === 'gemini' ? `
+    <div class="field"><label>Gemini API Key ${tag(c.gKeySet, c.gKeyTail)}</label>
+      <input class="input" id="cfGKey" type="password" autocomplete="off" placeholder="${c.gKeySet ? '留空则不修改' : 'AIza…（aistudio.google.com/apikey 创建）'}"></div>
+    <div class="field"><label>识别文字的模型（最少思考，省钱又快）</label><input class="input" id="cfGOcr" list="gList" value="${esc(c.config.gOcrModel)}" autocapitalize="off"></div>
+    <div class="field"><label>起标题的模型</label><input class="input" id="cfGTitle" list="gList" value="${esc(c.config.gTitleModel)}" autocapitalize="off"></div>
+    <datalist id="gList">${gModels.map(m => `<option value="${m}">`).join('')}</datalist>
+    <div class="muted small" style="margin-bottom:12px;line-height:1.7">用 Google AI Pro 每月送的 Cloud 赠金：在 AI Studio 里给这个 Key 所在的项目开启结算（Billing）。如果 AI Studio 是「预付」模式，要先充一点余额，赠金才会生效。</div>` : `
+    <div class="field"><label>OpenRouter API Key ${tag(c.keySet, c.keyTail)}</label>
       <input class="input" id="cfKey" type="password" autocomplete="off" placeholder="${c.keySet ? '留空则不修改' : 'sk-or-v1-…（openrouter.ai/keys 创建）'}"></div>
-    <div class="field"><label>识别文字的模型（要能看图；已关掉思考，省钱又快）</label><input class="input" id="cfOcr" list="mList" value="${esc(c.config.ocrModel)}" autocapitalize="off"></div>
+    <div class="field"><label>识别文字的模型（要能看图；已关掉思考）</label><input class="input" id="cfOcr" list="mList" value="${esc(c.config.ocrModel)}" autocapitalize="off"></div>
     <div class="field"><label>起标题的模型</label><input class="input" id="cfTitle" list="mList" value="${esc(c.config.titleModel)}" autocapitalize="off"></div>
-    <datalist id="mList">${models.map(m => `<option value="${m}">`).join('')}</datalist>
+    <datalist id="mList">${oModels.map(m => `<option value="${m}">`).join('')}</datalist>`}
     <div class="muted small" style="margin-bottom:12px;line-height:1.7">定时任务：${c.trigger.active ? '✅ ' + esc(c.trigger.text) : '❌ 未创建（点保存会自动创建）'}　时区：${esc(c.config.tz)}<br>
       ${lj ? `上次整理：${longTime(lj.at)}，起标题 ${lj.titled} 条，存 Drive ${lj.uploaded} 条${lj.failed ? `，<span style="color:var(--bad)">失败 ${lj.failed}</span>` : ''}` : '还没整理过'}</div>
     <div class="row wrap"><button class="btn btn-primary btn-sm" onclick="saveCfg()">保存配置</button><button class="btn btn-sm" onclick="testKey()">测试 Key</button><button class="btn btn-sm" onclick="runJob_()">立即整理一次</button></div>`;
@@ -894,14 +906,16 @@ async function loadAdmin(){
   renderAdmin();
 }
 async function saveCfg(){
-  const set = {ocrModel:$('cfOcr').value, titleModel:$('cfTitle').value};
+  const pv = ADM.pv || ADM.cfg.config.provider || 'gemini', set = {provider:pv};
+  if(pv === 'gemini'){ set.gOcrModel = $('cfGOcr').value; set.gTitleModel = $('cfGTitle').value; const g = $('cfGKey').value.trim(); if(g) set.gKey = g; }
+  else { set.ocrModel = $('cfOcr').value; set.titleModel = $('cfTitle').value; const k = $('cfKey').value.trim(); if(k) set.key = k; }
   try{ set.tz = Intl.DateTimeFormat().resolvedOptions().timeZone; }catch(e){}
-  const k = $('cfKey').value.trim(); if(k) set.key = k;
-  try{ ADM.cfg = await api('admin.config', {token:A.token, set}); toast('配置已保存'); renderAdmin(); pull(); }
+  try{ ADM.cfg = await api('admin.config', {token:A.token, set}); ADM.pv = null; toast('配置已保存'); renderAdmin(); pull(); }
   catch(e){ toast(e.message, 3500); }
 }
 async function testKey(){
-  try{ const r = await api('admin.test', {token:A.token}); toast(`Key 可用${r.limitRemaining != null ? '，剩余额度 $' + Number(r.limitRemaining).toFixed(2) : ''}${r.usage != null ? '，已用 $' + Number(r.usage).toFixed(2) : ''}`, 3500); }
+  toast('正在测试…', 15000);
+  try{ const r = await api('admin.test', {token:A.token}); toast(r.provider === 'gemini' ? `Gemini Key 可用，模型 ${r.model} 调用成功（用量在 Google AI Studio 里看）` : `OpenRouter Key 可用${r.limitRemaining != null ? '，剩余额度 $' + Number(r.limitRemaining).toFixed(2) : ''}${r.usage != null ? '，已用 $' + Number(r.usage).toFixed(2) : ''}`, 4500); }
   catch(e){ toast(e.message, 4000); }
 }
 async function runJob_(){
@@ -949,7 +963,7 @@ function showSetup(){
     <li>「部署」→「新建部署」→ 类型选「网页应用」，执行身份 <b>我</b>，访问权限 <b>任何人</b> → 部署并授权（提示未验证就点「高级 → 转至」）</li>
     <li>复制 …/exec 结尾的网址，填到「服务器设置」</li>
     <li>用 <code>SETUP_CODE</code> 作邀请码注册第一个账号（管理员）</li>
-    <li>在「设置 → 管理员 → 服务器配置」填 OpenRouter API Key 并保存，会自动创建每小时整理一次的定时任务</li>
+    <li>在「设置 → 管理员 → 服务器配置」填 Gemini API Key（或者切到 OpenRouter 填它的 Key）并保存，会自动创建每小时整理一次的定时任务</li>
   </ol><p>以后更新代码：「部署 → 管理部署 → 铅笔 → 版本选新版本 → 部署」，网址不变。</p>`, '');
   $('infoCopy').style.display = 'flex'; $('infoCopy').textContent = '复制 Code.gs'; $('infoCopy').onclick = copyScript;
 }

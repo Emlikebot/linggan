@@ -1,6 +1,6 @@
 /**
  * 灵感 · 服务器（Google Apps Script）
- * 负责：账号与邀请码、收到截屏 → 调 OpenRouter 只提取文字（截屏本身不保存）、三端同步、
+ * 负责：账号与邀请码、收到截屏 → 调 Gemini 官方 API（或 OpenRouter）只提取文字（截屏本身不保存）、三端同步、
  *       每份内容提取 24 小时后自动起标题并上传到 Google Drive。
  *
  * 只需管理员部署一次：
@@ -11,7 +11,7 @@
  *    （出现“Google 尚未验证此应用”时点「高级」→「转至…（不安全）」，这是你自己的脚本）
  * 4. 复制「网页应用」网址（…/exec 结尾），在 App 登录页「服务器设置」里填入
  * 5. 在 App 里用 SETUP_CODE 注册第一个账号，它就是管理员
- * 6. 管理员在 App「设置 → 管理员 → 服务器配置」里填 OpenRouter API Key（只存在本脚本的脚本属性里），
+ * 6. 管理员在 App「设置 → 管理员 → 服务器配置」里填 Gemini API Key（aistudio.google.com/apikey 创建；只存在本脚本的脚本属性里），
  *    保存时会自动创建「每小时整理一次」的定时任务（给满 24 小时的内容起标题、上传到 Drive）
  *
  * 以后改了代码：「部署」→「管理部署」→ 铅笔 → 版本选「新版本」→ 部署（网址不变）
@@ -20,7 +20,7 @@
  *   notes.json            全部内容（App 同步用）
  *   笔记/YYYY-MM/*.md     满 24 小时的内容，每份一个 Markdown 文件（标题做文件名）
  * 截屏图片只在识别时经过服务器内存，识别完就丢掉，任何地方都不保存。
- * 账号、密码（加盐哈希）、邀请码、OpenRouter Key 存在本脚本的「脚本属性」里。
+ * 账号、密码（加盐哈希）、邀请码、API Key 存在本脚本的「脚本属性」里。
  */
 const SETUP_CODE = '改成你的管理员初始邀请码';
 const APP_ID = 'linggan';
@@ -28,8 +28,12 @@ const ROOT_FOLDER = '灵感云端';
 const TOKEN_DAYS = 365;
 const HASH_ROUNDS = 400;
 const OR_BASE = 'https://openrouter.ai/api/v1';
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const MAX_PARTS = 12;                 // 一张长截屏最多切成几段
 const DEFAULT_CFG = {
+  provider: 'gemini',                          // gemini = Gemini 官方 API；openrouter = 走 OpenRouter
+  gOcrModel: 'gemini-3.5-flash-lite',          // Gemini 官方：识别文字（最少思考，便宜又快）
+  gTitleModel: 'gemini-3.5-flash-lite',        // Gemini 官方：起标题
   ocrModel: 'google/gemini-2.5-flash',         // 识别文字用的模型（要能看图；关掉思考，又快又便宜）
   titleModel: 'google/gemini-2.5-flash-lite',  // 起标题用的模型（最便宜的就够用）
   tz: 'Asia/Shanghai',                         // 文件名里的日期用这个时区（保存配置时自动用手机的时区）
@@ -98,7 +102,7 @@ const API = {
     return { token: token_(u), user: pub_(u) };
   },
 
-  me: function (b) { return { user: pub_(auth_(b.token)), ready: !!orKey_() }; },
+  me: function (b) { return { user: pub_(auth_(b.token)), ready: !!aiKey_() }; },
 
   password: function (b) {
     const u = auth_(b.token);
@@ -126,7 +130,7 @@ const API = {
     if (N.deleted[id]) return { note: null, deleted: true };
     const ex = N.notes.filter(function (x) { return x.id === id; })[0];
     if (ex) return { note: ex };
-    if (!orKey_()) fail_('管理员还没在「服务器配置」里填 OpenRouter API Key', 'nokey');
+    if (!aiKey_()) fail_('管理员还没在「服务器配置」里填 ' + (provider_() === 'gemini' ? 'Gemini' : 'OpenRouter') + ' API Key', 'nokey');
     const r = ocr_(imgs);                          // 图片只在这里用一次
     imgs = null; b.images = null; b.data = null;
     if (!r.text) return { note: null, empty: true };
@@ -154,7 +158,7 @@ const API = {
       full: !since,
       notes: N.notes.filter(function (x) { return (x.u || 0) > since; }),
       deleted: Object.keys(N.deleted).filter(function (k) { return N.deleted[k] > since; }),
-      ready: !!orKey_(),
+      ready: !!aiKey_(),
       archiveHours: cfg_().archiveHours
     };
   },
@@ -255,25 +259,39 @@ const API = {
     adminOnly_(b.token);
     if (b.set) {
       const c = cfg_(), s = b.set;
+      if (s.provider === 'gemini' || s.provider === 'openrouter') c.provider = s.provider;
+      if (s.gOcrModel != null) c.gOcrModel = String(s.gOcrModel).trim().replace(/^models\//, '') || DEFAULT_CFG.gOcrModel;
+      if (s.gTitleModel != null) c.gTitleModel = String(s.gTitleModel).trim().replace(/^models\//, '') || DEFAULT_CFG.gTitleModel;
       if (s.ocrModel != null) c.ocrModel = String(s.ocrModel).trim() || DEFAULT_CFG.ocrModel;
       if (s.titleModel != null) c.titleModel = String(s.titleModel).trim() || DEFAULT_CFG.titleModel;
       if (s.archiveHours != null && isFinite(Number(s.archiveHours))) c.archiveHours = Math.min(24 * 30, Math.max(0, Number(s.archiveHours)));
       if (s.tz) { try { Utilities.formatDate(new Date(), String(s.tz), 'Z'); c.tz = String(s.tz); } catch (e) { fail_('时区不对：' + s.tz); } }
       setJSON_('config', c);
       if (s.key) props_().setProperty('OPENROUTER_API_KEY', String(s.key).trim());
+      if (s.gKey) props_().setProperty('GEMINI_API_KEY', String(s.gKey).trim());
       ensureTrigger_(true);
     }
-    const k = orKey_();
-    return { config: cfg_(), keySet: !!k, keyTail: k ? k.slice(-4) : '', trigger: triggerInfo_(), lastJob: getJSON_('lastJob') };
+    const k = orKey_(), g = gKey_();
+    return { config: cfg_(), keySet: !!k, keyTail: k ? k.slice(-4) : '', gKeySet: !!g, gKeyTail: g ? g.slice(-4) : '', trigger: triggerInfo_(), lastJob: getJSON_('lastJob') };
   },
-  /* 测试 OpenRouter Key 是否可用 */
+  /* 测试当前用的 API Key 是否可用 */
   'admin.test': function (b) {
     adminOnly_(b.token);
+    if (provider_() === 'gemini') {
+      const g = gKey_(); if (!g) fail_('还没填 Gemini API Key');
+      const model = cfg_().gOcrModel;
+      const r = UrlFetchApp.fetch(GEMINI_BASE + '/models/' + encodeURIComponent(model), { headers: { 'x-goog-api-key': g }, muteHttpExceptions: true });
+      if (r.getResponseCode() !== 200) fail_('Key 或模型不可用（' + r.getResponseCode() + '）：' + r.getContentText().slice(0, 200));
+      // 真正发一个很短的请求，确认账单 / 额度可用（只有密钥对、但没开结算时这里会报错）
+      const t = chat_(model, '只回复两个字：可用', 'none', 0);
+      if (t.err) fail_('Key 能用，但调用模型失败：' + t.err);
+      return { provider: 'gemini', model: model };
+    }
     const k = orKey_(); if (!k) fail_('还没填 OpenRouter API Key');
     const r = UrlFetchApp.fetch(OR_BASE + '/key', { headers: { Authorization: 'Bearer ' + k }, muteHttpExceptions: true });
     if (r.getResponseCode() !== 200) fail_('Key 不可用（' + r.getResponseCode() + '）：' + r.getContentText().slice(0, 200));
     const d = (JSON.parse(r.getContentText()) || {}).data || {};
-    return { label: d.label || '', usage: d.usage, limit: d.limit, limitRemaining: d.limit_remaining };
+    return { provider: 'openrouter', label: d.label || '', usage: d.usage, limit: d.limit, limitRemaining: d.limit_remaining };
   },
   /* 立刻整理一次（不用等整点） */
   'admin.run': function (b) {
@@ -284,7 +302,7 @@ const API = {
 
 /* ---------------- 识别文字 ---------------- */
 function ocr_(imgs) {
-  const c = cfg_(), k = orKey_();
+  const c = cfg_();
   const multi = imgs.length > 1;
   const prompt =
     '下面是一张手机截屏' + (multi ? '（因为太长，按从上到下的顺序切成了 ' + imgs.length + ' 段，相邻两段之间有一小段重叠，重叠的内容只保留一次）' : '') +
@@ -302,7 +320,7 @@ function ocr_(imgs) {
     const mime = /^image\/(png|jpeg|jpg|webp|gif)$/i.test(String(im.mime || '')) ? String(im.mime).toLowerCase().replace('jpg', 'jpeg') : 'image/jpeg';
     return { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + String(im.data).replace(/^data:[^,]*,/, '') } };
   }));
-  const j = chat_(c.ocrModel, content, 'none', 0);      // 照抄文字不需要思考
+  const j = chat_(ocrModel_(), content, 'none', 0);      // 照抄文字不需要思考
   if (j.err) fail_('识别失败：' + j.err, 'ocr');
   return parseOcr_(j.text);
 }
@@ -329,9 +347,10 @@ function normSource_(s) {
   return SOURCES.indexOf(s) >= 0 ? s : '其他';
 }
 
-/* 调 OpenRouter 聊天接口，返回 {text} 或 {err}。
+/* 调大模型，返回 {text} 或 {err}。content 是字符串，或 [{type:'text'}, {type:'image_url'}] 数组。
    effort = 'none' 表示关掉思考；有的模型（比如 Gemini 3）不允许关，会自动退回最少思考再试一次 */
 function chat_(model, content, effort, temperature) {
+  if (provider_() === 'gemini') return geminiChat_(model, content, effort, temperature);
   const r = chatOnce_(model, content, effort, temperature);
   if (r.err && effort === 'none' && r.code === 400 && /reason|think/i.test(r.err)) return chatOnce_(model, content, 'minimal', temperature);
   return r;
@@ -353,6 +372,57 @@ function chatOnce_(model, content, effort, temperature) {
     let out = msg && msg.content;
     if (Array.isArray(out)) out = out.map(function (p) { return p && p.text || ''; }).join('');
     if (code !== 200 || typeof out !== 'string') return { code: code, err: '（' + code + '）' + String((j && j.error && (j.error.message || j.error)) || txt).slice(0, 300) };
+    return { text: out };
+  } catch (e) {
+    return { err: String(e && e.message || e).slice(0, 300) };
+  }
+}
+
+/* ---------------- Gemini 官方 API ---------------- */
+const SAFETY = ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT'];
+function geminiChat_(model, content, effort, temperature) {
+  model = String(model || '').replace(/^models\//, '');
+  const parts = (Array.isArray(content) ? content : [{ type: 'text', text: String(content) }]).map(function (c) {
+    if (c.type === 'image_url') {
+      const m = String(c.image_url.url).match(/^data:([^;]+);base64,(.*)$/);
+      return { inline_data: { mime_type: m ? m[1] : 'image/jpeg', data: m ? m[2] : '' } };
+    }
+    return { text: String(c.text || '') };
+  });
+  // 关掉 / 压低思考：2.x 用 thinkingBudget=0，3.x 起用 thinkingLevel=minimal
+  let thinking = null;
+  if (effort === 'none') thinking = /^gemini-[12]\./.test(model) ? { thinkingBudget: 0 } : { thinkingLevel: 'minimal' };
+  let r = geminiOnce_(model, parts, thinking, temperature);
+  if (r.err && thinking && r.code === 400 && /think/i.test(r.err)) r = geminiOnce_(model, parts, null, temperature);   // 这个模型不支持这样设，就用默认
+  return r;
+}
+function geminiOnce_(model, parts, thinking, temperature) {
+  const k = gKey_();
+  if (!k) return { err: '还没配置 Gemini API Key' };
+  const gen = {};
+  if (thinking) gen.thinkingConfig = thinking;
+  if (temperature != null && /^gemini-[12]\./.test(model)) gen.temperature = temperature;   // Gemini 3 起官方建议保持默认温度
+  const payload = { contents: [{ role: 'user', parts: parts }], generationConfig: gen,
+    safetySettings: SAFETY.map(function (c) { return { category: c, threshold: 'BLOCK_ONLY_HIGH' }; }) };
+  try {
+    const r = UrlFetchApp.fetch(GEMINI_BASE + '/models/' + encodeURIComponent(model) + ':generateContent', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true, payload: JSON.stringify(payload),
+      headers: { 'x-goog-api-key': k }
+    });
+    const code = r.getResponseCode(), txt = r.getContentText();
+    let j = null; try { j = JSON.parse(txt); } catch (e) {}
+    if (code !== 200) {
+      let msg = String((j && j.error && j.error.message) || txt).slice(0, 300);
+      if (code === 429 && /prepay|credit|billing/i.test(msg)) msg += '（Google AI Studio 的结算是预付模式时，要先充值一点余额，赠送的额度才会生效）';
+      else if (code === 429) msg += '（请求太多或额度用完，稍后自动重试）';
+      return { code: code, err: '（' + code + '）' + msg };
+    }
+    const cand = j && j.candidates && j.candidates[0];
+    const out = cand && cand.content && cand.content.parts ? cand.content.parts.filter(function (p) { return !p.thought; }).map(function (p) { return p.text || ''; }).join('') : '';
+    if (!out) {
+      const why = (cand && cand.finishReason) || (j && j.promptFeedback && j.promptFeedback.blockReason) || '没有返回文字';
+      return { code: code, err: '模型没有返回文字（' + why + (why === 'RECITATION' ? '：Gemini 认为内容可能受版权保护，拒绝原样输出' : '') + '）' };
+    }
     return { text: out };
   } catch (e) {
     return { err: String(e && e.message || e).slice(0, 300) };
@@ -389,7 +459,7 @@ function hourlyJob() {
       // 1) 起标题（慢，不占锁）
       const titles = {};
       due.forEach(function (x) {
-        if (x.title || !orKey_() || Date.now() - started > 4 * 60000) return;
+        if (x.title || !aiKey_() || Date.now() - started > 4 * 60000) return;
         const t = makeTitle_(x);
         if (t) titles[x.id] = { title: t, text: x.text }; else res.failed++;
       });
@@ -401,7 +471,7 @@ function hourlyJob() {
           if (!n) return;                                         // 这期间被删除或合并掉了
           const tt = titles[n.id];
           if (!n.title && tt && tt.text === n.text) { n.title = tt.title; n.titleBy = 'ai'; res.titled++; }
-          if (!n.title && orKey_()) return;                      // 标题还没起好，下次再上传
+          if (!n.title && aiKey_()) return;                      // 标题还没起好，下次再上传
           try {
             n.drive = saveToDrive_(u.name, n);
             if (!n.archivedAt) n.archivedAt = now;
@@ -420,7 +490,7 @@ function hourlyJob() {
 function makeTitle_(n) {
   const prompt = '给下面这段从手机截屏里提取的文字起一个简短的中文标题：6–18 个字，概括核心内容，方便以后搜索。\n' +
     '只输出标题本身，不加引号、书名号、句号，不要任何解释。\n\n来源：' + (n.source || '其他') + '\n\n' + String(n.text || '').slice(0, 8000);
-  const j = chat_(cfg_().titleModel, prompt, 'none', 0.3);
+  const j = chat_(titleModel_(), prompt, 'none', 0.3);
   if (j.err) { console.error('起标题失败：' + j.err); return ''; }
   return cleanTitle_(String(j.text || '').trim().split('\n')[0]);
 }
@@ -494,6 +564,11 @@ function cfg_() {
   return c;
 }
 function orKey_() { return props_().getProperty('OPENROUTER_API_KEY') || ''; }
+function gKey_() { return props_().getProperty('GEMINI_API_KEY') || ''; }
+function provider_() { return cfg_().provider === 'openrouter' ? 'openrouter' : 'gemini'; }
+function aiKey_() { return provider_() === 'gemini' ? gKey_() : orKey_(); }
+function ocrModel_() { const c = cfg_(); return provider_() === 'gemini' ? c.gOcrModel : c.ocrModel; }
+function titleModel_() { const c = cfg_(); return provider_() === 'gemini' ? c.gTitleModel : c.titleModel; }
 function getUser_(name) { return getJSON_('user:' + String(name).toLowerCase()); }
 function putUser_(u) { setJSON_('user:' + u.name.toLowerCase(), u); }
 function getInvite_(code) { return code ? getJSON_('inv:' + code) : null; }

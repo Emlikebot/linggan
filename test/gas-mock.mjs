@@ -72,6 +72,33 @@ const ctx = {
     o = o || {};
     const key = (o.headers || {}).Authorization;
     if (url.endsWith('/key')) return resp(key === 'Bearer sk-or-test' ? 200 : 401, { data: { label: 'test', usage: 1.5, limit: 10, limit_remaining: 8.5 } });
+    // ---- Gemini 官方 API ----
+    if (url.startsWith('https://generativelanguage.googleapis.com/')) {
+      const gk = (o.headers || {})['x-goog-api-key'];
+      if (gk !== 'AIza-test') return resp(400, { error: { message: 'API key not valid. Please pass a valid API key.' } });
+      const mm = url.match(/\/models\/([^:?]+)(:generateContent)?/);
+      const model = decodeURIComponent(mm[1]);
+      if (!mm[2]) return resp(200, { name: 'models/' + model });
+      const p = JSON.parse(o.payload);
+      const parts = p.contents[0].parts;
+      const th = (p.generationConfig || {}).thinkingConfig || null;
+      OR.calls.push({ api: 'gemini', model, thinking: th, image: parts.some(x => x.inline_data) });
+      if (/nothink/.test(model) && th) return resp(400, { error: { message: 'Thinking level is not supported for this model.' } });
+      const text = c => resp(200, { candidates: [{ content: { parts: [{ text: 'hmm', thought: true }, { text: c }] }, finishReason: 'STOP' }] });
+      const imgs = parts.filter(x => x.inline_data).map(x => ({ mime: x.inline_data.mime_type, bytes: Buffer.from(x.inline_data.data, 'base64').length }));
+      if (imgs.length) {
+        const k = OR.ocr.length;
+        OR.ocr.push({ api: 'gemini', model, thinking: th, parts: imgs.length, imgs, prompt: parts[0].text });
+        if (OR.failOcr) return resp(503, { error: { message: 'The model is overloaded.' } });
+        if (imgs.every(i => i.bytes < 2500)) return text('来源：其他\n\n（无文字）');
+        return text(`来源：${SRC[k % 4]}\n\n第${k + 1}张截屏 共${imgs.length}段\n今天要记得买牛奶。\n关键词 苹果${k + 1}`);
+      }
+      const c = parts[0].text;
+      if (/只回复两个字/.test(c)) return text('可用');
+      OR.titles.push({ api: 'gemini', model, thinking: th, prompt: c });
+      const m = String(c).match(/关键词 (苹果\d+)/);
+      return text('「' + (m ? m[1] + '的笔记' : '合并的笔记') + '」');
+    }
     if (key !== 'Bearer sk-or-test') return resp(401, { error: { message: 'bad key' } });
     const p = JSON.parse(o.payload);
     if (url.endsWith('/chat/completions')) {
